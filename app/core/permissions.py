@@ -5,7 +5,6 @@ from fastapi import HTTPException, status
 from app.core.security import UserPrincipal
 from app.models.file import FileMetadata
 
-
 VALID_FILE_TYPES = {"avatar", "project_logo", "task_logo", "task_attachment"}
 VALID_ENTITY_TYPES = {"user", "project", "task"}
 
@@ -82,9 +81,10 @@ def validate_entity_type(entity_type: str) -> None:
         HTTPException: If entity_type is invalid.
     """
     if entity_type not in VALID_ENTITY_TYPES:
+        allowed = ", ".join(sorted(VALID_ENTITY_TYPES))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid entity_type. Allowed: {', '.join(sorted(VALID_ENTITY_TYPES))}",
+            detail=f"Invalid entity_type. Allowed: {allowed}",
         )
 
 
@@ -200,5 +200,5 @@ async def validate_file_magic_bytes(
     if declared_content_type and detected_type != declared_content_type:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File content type mismatch. Detected: {detected_type}, declared: {declared_content_type}",
+            detail=f"Content type mismatch: {detected_type} vs {declared_content_type}",
         )

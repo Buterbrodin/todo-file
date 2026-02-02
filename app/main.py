@@ -3,7 +3,7 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 
-from app.backend.db import engine, ensure_engine
+from app.backend.db import engine
 from app.routers import files
 from app.services.kafka_service import kafka_service
 from app.services.s3_service import S3Service

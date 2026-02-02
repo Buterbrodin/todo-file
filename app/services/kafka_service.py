@@ -25,6 +25,7 @@ class KafkaService:
             return
         try:
             from aiokafka import AIOKafkaProducer
+
             self._producer_cls = AIOKafkaProducer
         except ModuleNotFoundError:
             logger.warning("aiokafka not installed, Kafka will be disabled")
@@ -99,7 +100,9 @@ class KafkaService:
                 if attempt < self._max_retries - 1:
                     await asyncio.sleep(self._retry_delay * (attempt + 1))
 
-        logger.error("Failed to send message to Kafka after %d attempts", self._max_retries)
+        logger.error(
+            "Failed to send message to Kafka after %d attempts", self._max_retries
+        )
         return False
 
     async def send_file_uploaded(self, payload: dict[str, Any]) -> bool:

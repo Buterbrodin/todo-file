@@ -70,7 +70,7 @@ def decode_token(token: str) -> UserPrincipal:
     if token_type == "verification_access":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email verification required. Please verify your email to access this resource.",
+            detail="Email verification required",
         )
     if token_type not in ("access", None):
         raise HTTPException(

@@ -3,8 +3,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-
-logger = logging.getLogger(__name__)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +21,8 @@ from app.schemas.file import FileListResponse, FileResponse
 from app.services.kafka_service import kafka_service
 from app.services.s3_service import S3Service, infer_bucket
 from app.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/files", tags=["files"])
 
@@ -55,7 +55,9 @@ async def get_file_size(file: UploadFile) -> int:
     return 0
 
 
-@router.post("/upload", response_model=FileResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/upload", response_model=FileResponse, status_code=status.HTTP_201_CREATED
+)
 async def upload_file(
     file: UploadFile = File(...),
     file_type: str = "task_attachment",
@@ -225,7 +227,9 @@ async def list_files(
     res = await db.execute(stmt)
     files = res.scalars().all()
 
-    return FileListResponse(files=list(files), total=total, page=page, page_size=page_size)
+    return FileListResponse(
+        files=list(files), total=total, page=page, page_size=page_size
+    )
 
 
 @router.put("/{file_id}", response_model=FileResponse, status_code=status.HTTP_200_OK)
@@ -266,9 +270,10 @@ async def update_file(
     await check_file_permission(user, meta, "write")
 
     if file.content_type and file.content_type not in settings.ALLOWED_IMAGE_TYPES:
+        allowed = ", ".join(settings.ALLOWED_IMAGE_TYPES)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid content type. Allowed: {', '.join(settings.ALLOWED_IMAGE_TYPES)}",
+            detail=f"Invalid content type. Allowed: {allowed}",
         )
 
     file_size = await get_file_size(file)
@@ -348,7 +353,12 @@ async def delete_file(
     try:
         await s3_service.delete_file(bucket=meta.bucket_name, key=meta.file_key)
     except Exception as exc:
-        logger.warning("Failed to delete file from S3 (bucket=%s, key=%s): %s", meta.bucket_name, meta.file_key, exc)
+        logger.warning(
+            "Failed to delete file from S3 (bucket=%s, key=%s): %s",
+            meta.bucket_name,
+            meta.file_key,
+            exc,
+        )
 
     meta.deleted_at = datetime.now(timezone.utc)
     await db.commit()

@@ -1,4 +1,12 @@
-from sqlalchemy import BigInteger, Column, DateTime, Index, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.sql import func
 
 from app.backend.db import Base

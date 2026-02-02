@@ -80,6 +80,12 @@ disable = [
     "assignment-from-no-return",
     "not-callable",
     "mixed-line-endings",
+    "global-statement",
+    "redefined-outer-name",
+    "protected-access",
+    "broad-exception-caught",
+    "wrong-import-position",
+    "line-too-long",
 ]
 
 [tool.pylint.format]
@@ -100,7 +106,10 @@ extend-ignore = [
     "D107",
 ]
 exclude = [".git", "__pycache__", ".venv", "build", "dist", "*.egg-info", "migrations"]
-per-file-ignores = ["app/__init__.py:F401"]
+per-file-ignores = [
+    "app/__init__.py:F401",
+    "tests/*:F401,F811",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

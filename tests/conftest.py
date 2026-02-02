@@ -51,6 +51,7 @@ async def test_db() -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture
 async def client(test_db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """Create test HTTP client with database override."""
+
     async def override_get_db_session() -> AsyncSession:
         return test_db
 
@@ -81,6 +82,7 @@ async def authenticated_client(
     test_user: UserPrincipal,
 ) -> AsyncGenerator[AsyncClient, None]:
     """Create authenticated test client."""
+
     async def override_get_current_user() -> UserPrincipal:
         return test_user
 
@@ -95,6 +97,7 @@ async def admin_client(
     test_admin: UserPrincipal,
 ) -> AsyncGenerator[AsyncClient, None]:
     """Create admin authenticated test client."""
+
     async def override_get_current_user() -> UserPrincipal:
         return test_admin
 

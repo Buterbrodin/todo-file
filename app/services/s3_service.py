@@ -20,6 +20,7 @@ class S3Service:
             return
         try:
             import aioboto3
+
             self._session = aioboto3.Session()
         except ModuleNotFoundError:
             logger.warning("aioboto3 not installed, S3 will be disabled")
@@ -58,7 +59,9 @@ class S3Service:
                             await s3.create_bucket(Bucket=bucket)
                             logger.info("Created bucket: %s", bucket)
                         except Exception as exc:
-                            logger.warning("Failed to create bucket %s: %s", bucket, exc)
+                            logger.warning(
+                                "Failed to create bucket %s: %s", bucket, exc
+                            )
 
             self._buckets_initialized = True
         except Exception as exc:

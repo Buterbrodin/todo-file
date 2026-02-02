@@ -28,7 +28,9 @@ class TestUserPrincipal:
         assert user.is_admin is True
 
     def test_user_principal_multiple_roles(self):
-        user = UserPrincipal(user_id=3, roles=["member", "admin"], email="test@example.com")
+        user = UserPrincipal(
+            user_id=3, roles=["member", "admin"], email="test@example.com"
+        )
 
         assert user.roles == ["member", "admin"]
         assert user.role == "admin"

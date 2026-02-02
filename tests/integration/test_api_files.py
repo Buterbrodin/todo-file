@@ -1,5 +1,3 @@
-from io import BytesIO
-
 import pytest
 from fastapi import status
 
@@ -16,7 +14,9 @@ async def test_upload_file_success(authenticated_client, test_db, test_image_fil
         "entity_id": 1,
     }
 
-    response = await authenticated_client.post("/api/files/upload", files=files, data=data)
+    response = await authenticated_client.post(
+        "/api/files/upload", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_201_CREATED
     data = response.json()
@@ -38,14 +38,18 @@ async def test_upload_file_too_large(authenticated_client, test_large_file):
         "entity_id": 1,
     }
 
-    response = await authenticated_client.post("/api/files/upload", files=files, data=data)
+    response = await authenticated_client.post(
+        "/api/files/upload", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert "too large" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
-async def test_upload_file_invalid_content_type(authenticated_client, test_invalid_file):
+async def test_upload_file_invalid_content_type(
+    authenticated_client, test_invalid_file
+):
     """Test upload rejection for invalid content type."""
     test_invalid_file.seek(0)
     files = {"file": ("test.txt", test_invalid_file, "text/plain")}
@@ -55,7 +59,9 @@ async def test_upload_file_invalid_content_type(authenticated_client, test_inval
         "entity_id": 1,
     }
 
-    response = await authenticated_client.post("/api/files/upload", files=files, data=data)
+    response = await authenticated_client.post(
+        "/api/files/upload", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
     assert "content type" in response.json()["detail"].lower()
@@ -72,7 +78,9 @@ async def test_upload_file_invalid_file_type(authenticated_client, test_image_fi
         "entity_id": 1,
     }
 
-    response = await authenticated_client.post("/api/files/upload", files=files, data=data)
+    response = await authenticated_client.post(
+        "/api/files/upload", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -88,7 +96,9 @@ async def test_upload_file_invalid_entity_type(authenticated_client, test_image_
         "entity_id": 1,
     }
 
-    response = await authenticated_client.post("/api/files/upload", files=files, data=data)
+    response = await authenticated_client.post(
+        "/api/files/upload", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -119,7 +129,9 @@ async def test_upload_file_other_user(authenticated_client, test_image_file):
         "entity_id": 2,
     }
 
-    response = await authenticated_client.post("/api/files/upload", files=files, data=data)
+    response = await authenticated_client.post(
+        "/api/files/upload", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
@@ -189,7 +201,9 @@ async def test_list_files_pagination(authenticated_client, test_file_metadata):
 
 
 @pytest.mark.asyncio
-async def test_update_file_success(authenticated_client, test_file_metadata, test_image_file):
+async def test_update_file_success(
+    authenticated_client, test_file_metadata, test_image_file
+):
     """Test successful file update."""
     test_image_file.seek(0)
     files = {"file": ("updated.png", test_image_file, "image/png")}
@@ -213,7 +227,9 @@ async def test_update_file_not_found(authenticated_client, test_image_file):
     files = {"file": ("updated.png", test_image_file, "image/png")}
     data = {}
 
-    response = await authenticated_client.put("/api/files/99999", files=files, data=data)
+    response = await authenticated_client.put(
+        "/api/files/99999", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
@@ -327,7 +343,9 @@ async def test_upload_project_logo(authenticated_client, test_db, test_image_fil
         "entity_id": 1,
     }
 
-    response = await authenticated_client.post("/api/files/upload", files=files, data=data)
+    response = await authenticated_client.post(
+        "/api/files/upload", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_201_CREATED
     data = response.json()
@@ -346,7 +364,9 @@ async def test_upload_task_attachment(authenticated_client, test_db, test_image_
         "entity_id": 1,
     }
 
-    response = await authenticated_client.post("/api/files/upload", files=files, data=data)
+    response = await authenticated_client.post(
+        "/api/files/upload", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_201_CREATED
     data = response.json()
@@ -357,7 +377,9 @@ async def test_upload_task_attachment(authenticated_client, test_db, test_image_
 @pytest.mark.asyncio
 async def test_list_files_empty(authenticated_client, test_db):
     """Test file listing when no files exist."""
-    response = await authenticated_client.get("/api/files/?entity_type=user&entity_id=999")
+    response = await authenticated_client.get(
+        "/api/files/?entity_type=user&entity_id=999"
+    )
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -366,7 +388,9 @@ async def test_list_files_empty(authenticated_client, test_db):
 
 
 @pytest.mark.asyncio
-async def test_update_file_with_new_type(authenticated_client, test_file_metadata, test_image_file):
+async def test_update_file_with_new_type(
+    authenticated_client, test_file_metadata, test_image_file
+):
     """Test updating file with new file type."""
     test_image_file.seek(0)
     files = {"file": ("updated.png", test_image_file, "image/png")}
@@ -384,7 +408,9 @@ async def test_update_file_with_new_type(authenticated_client, test_file_metadat
 
 
 @pytest.mark.asyncio
-async def test_get_deleted_file_returns_404(authenticated_client, test_db, test_file_metadata):
+async def test_get_deleted_file_returns_404(
+    authenticated_client, test_db, test_file_metadata
+):
     """Test that deleted files return 404."""
     await authenticated_client.delete(f"/api/files/{test_file_metadata.id}")
 
@@ -404,7 +430,9 @@ async def test_upload_file_invalid_entity_id(authenticated_client, test_image_fi
         "entity_id": 0,
     }
 
-    response = await authenticated_client.post("/api/files/upload", files=files, data=data)
+    response = await authenticated_client.post(
+        "/api/files/upload", files=files, data=data
+    )
 
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
