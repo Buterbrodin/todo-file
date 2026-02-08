@@ -4,6 +4,7 @@ from unittest.mock import patch
 import jwt
 import pytest
 from fastapi import HTTPException
+from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core.deps import get_current_user
 
@@ -28,7 +29,9 @@ async def test_get_current_user_success():
             email="test@example.com",
         )
 
-        user = await get_current_user(authorization=f"Bearer {token}")
+        user = await get_current_user(
+            credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        )
 
         assert user.id == 1
         assert user.roles == ["member"]
@@ -38,7 +41,7 @@ async def test_get_current_user_success():
 @pytest.mark.asyncio
 async def test_get_current_user_no_header():
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_user(authorization=None)
+        await get_current_user(credentials=None)
 
     assert exc_info.value.status_code == 401
     assert "Not authenticated" in exc_info.value.detail
@@ -47,7 +50,11 @@ async def test_get_current_user_no_header():
 @pytest.mark.asyncio
 async def test_get_current_user_invalid_header_format():
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_user(authorization="InvalidFormat token123")
+        await get_current_user(
+            credentials=HTTPAuthorizationCredentials(
+                scheme="InvalidFormat", credentials="token123"
+            )
+        )
 
     assert exc_info.value.status_code == 401
     assert "Not authenticated" in exc_info.value.detail
@@ -56,7 +63,11 @@ async def test_get_current_user_invalid_header_format():
 @pytest.mark.asyncio
 async def test_get_current_user_empty_bearer():
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_user(authorization="Basic token123")
+        await get_current_user(
+            credentials=HTTPAuthorizationCredentials(
+                scheme="Basic", credentials="token123"
+            )
+        )
 
     assert exc_info.value.status_code == 401
 
@@ -67,6 +78,10 @@ async def test_get_current_user_token_decode_error():
         mock_decode.side_effect = HTTPException(status_code=401, detail="Invalid token")
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_current_user(authorization="Bearer invalid_token")
+            await get_current_user(
+                credentials=HTTPAuthorizationCredentials(
+                    scheme="Bearer", credentials="invalid_token"
+                )
+            )
 
         assert exc_info.value.status_code == 401

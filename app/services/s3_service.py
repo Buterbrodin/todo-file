@@ -1,6 +1,7 @@
 import logging
 from typing import Any, BinaryIO, Optional
 
+from app.core.exceptions import S3ServiceError
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -55,12 +56,13 @@ class S3Service:
                     try:
                         await s3.head_bucket(Bucket=bucket)
                     except Exception:
+                        # Bucket doesn't exist, try to create it
                         try:
                             await s3.create_bucket(Bucket=bucket)
                             logger.info("Created bucket: %s", bucket)
-                        except Exception as exc:
+                        except Exception as create_exc:
                             logger.warning(
-                                "Failed to create bucket %s: %s", bucket, exc
+                                "Failed to create bucket %s: %s", bucket, create_exc
                             )
 
             self._buckets_initialized = True
@@ -85,14 +87,19 @@ class S3Service:
 
         Returns:
             URL of uploaded file.
+
+        Raises:
+            S3ServiceError: If upload fails.
         """
         self._ensure_session()
         if self._session is None:
-            return self.get_file_url(bucket, key)
+            raise S3ServiceError("S3 client is unavailable")
 
         await self._ensure_buckets()
 
         try:
+            if hasattr(file_obj, "seek"):
+                file_obj.seek(0)
             async with self._session.client("s3", **self._get_client_config()) as s3:
                 await s3.upload_fileobj(
                     file_obj,
@@ -101,9 +108,12 @@ class S3Service:
                     ExtraArgs={"ContentType": content_type},
                 )
             logger.info("Uploaded file to s3://%s/%s", bucket, key)
+        except (AttributeError, TypeError) as exc:
+            logger.error("Invalid file object: %s", exc)
+            raise S3ServiceError(f"Invalid file object: {exc}") from exc
         except Exception as exc:
             logger.error("Failed to upload file: %s", exc)
-            raise
+            raise S3ServiceError(f"Failed to upload file: {exc}") from exc
 
         return self.get_file_url(bucket, key)
 
@@ -116,10 +126,11 @@ class S3Service:
             key: Object key to delete.
 
         Returns:
-            True if deleted successfully.
+            True if deleted successfully, False on error.
         """
         self._ensure_session()
         if self._session is None:
+            logger.warning("S3 client is not initialized")
             return False
 
         try:
@@ -127,8 +138,11 @@ class S3Service:
                 await s3.delete_object(Bucket=bucket, Key=key)
             logger.info("Deleted file from s3://%s/%s", bucket, key)
             return True
+        except (AttributeError, TypeError) as exc:
+            logger.error("Invalid bucket or key format: %s", exc)
+            return False
         except Exception as exc:
-            logger.error("Failed to delete file: %s", exc)
+            logger.error("Failed to delete file from s3://%s/%s: %s", bucket, key, exc)
             return False
 
     def get_file_url(self, bucket: str, key: str) -> str:
@@ -191,3 +205,6 @@ def infer_bucket(file_type: str) -> str:
         "task_attachment": settings.S3_BUCKET_TASK_ATTACHMENTS,
     }
     return mapping.get(file_type, settings.S3_BUCKET_TASK_ATTACHMENTS)
+
+
+s3_service = S3Service()

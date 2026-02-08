@@ -1,12 +1,16 @@
+import logging
 from typing import Literal
 
 from fastapi import HTTPException, status
 
+from app.core.exceptions import CoreServiceError
 from app.core.security import UserPrincipal
 from app.models.file import FileMetadata
+from app.services.core_client import CoreServiceClient
 
 VALID_FILE_TYPES = {"avatar", "project_logo", "task_logo", "task_attachment"}
 VALID_ENTITY_TYPES = {"user", "project", "task"}
+logger = logging.getLogger(__name__)
 
 
 async def check_file_permission(
@@ -44,8 +48,41 @@ async def check_file_permission(
             detail="You cannot view other users' avatars",
         )
 
-    if file_meta.entity_type in ("project", "task"):
-        return True
+    if file_meta.entity_type == "project":
+        try:
+            core_client = CoreServiceClient()
+            has_access = await core_client.check_project_access(
+                user.id, file_meta.entity_id, action, user.email
+            )
+            if not has_access:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to project",
+                )
+            return True
+        except CoreServiceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Core service unavailable",
+            ) from exc
+
+    if file_meta.entity_type == "task":
+        try:
+            core_client = CoreServiceClient()
+            has_access = await core_client.check_task_access(
+                user.id, file_meta.entity_id, action, user.email
+            )
+            if not has_access:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to task",
+                )
+            return True
+        except CoreServiceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Core service unavailable",
+            ) from exc
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -117,6 +154,41 @@ async def validate_entity_exists(
                 detail="You can only upload files for yourself",
             )
 
+    if entity_type == "project":
+        try:
+            core_client = CoreServiceClient()
+            has_access = await core_client.check_project_access(
+                user.id, entity_id, "write", user.email
+            )
+            if not has_access:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to project",
+                )
+        except CoreServiceError as exc:
+            logger.warning("Core service project access check failed: %s", exc)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Core service unavailable",
+            ) from exc
+
+    if entity_type == "task":
+        try:
+            core_client = CoreServiceClient()
+            has_access = await core_client.check_task_access(
+                user.id, entity_id, "write", user.email
+            )
+            if not has_access:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied to task",
+                )
+        except CoreServiceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Core service unavailable",
+            ) from exc
+
 
 def validate_content_type(content_type: str | None, allowed_types: list[str]) -> None:
     """
@@ -161,6 +233,25 @@ MAGIC_BYTES = {
 }
 
 
+def _detect_webp(file_content: bytes) -> bool:
+    """
+    Detect if file is valid WebP.
+
+    WebP format:
+    - Bytes 0-3: "RIFF"
+    - Bytes 8-11: "WEBP"
+
+    Args:
+        file_content: File content bytes.
+
+    Returns:
+        True if valid WebP, False otherwise.
+    """
+    if len(file_content) < 12:
+        return False
+    return file_content.startswith(b"RIFF") and file_content[8:12] == b"WEBP"
+
+
 async def validate_file_magic_bytes(
     file_content: bytes,
     declared_content_type: str | None,
@@ -182,13 +273,21 @@ async def validate_file_magic_bytes(
         )
 
     detected_type = None
+
+    # Check standard magic bytes
     for magic, mime_type in MAGIC_BYTES.items():
         if file_content.startswith(magic):
-            detected_type = mime_type
+            # For RIFF, we need to check if it's actually WebP
+            if mime_type == "image/webp":
+                if _detect_webp(file_content):
+                    detected_type = "image/webp"
+            else:
+                detected_type = mime_type
             break
 
-    if detected_type is None:
-        if declared_content_type == "image/webp" and b"WEBP" in file_content[:12]:
+    # Double-check WebP format if declared
+    if detected_type is None and declared_content_type == "image/webp":
+        if _detect_webp(file_content):
             detected_type = "image/webp"
 
     if detected_type is None:

@@ -50,12 +50,15 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_FILE_DELETED: str = "file.deleted"
     KAFKA_TOPIC_FILE_UPDATED: str = "file.updated"
 
-    JWT_SECRET: str = Field(default="change_me_change_me", min_length=16)
+    JWT_SECRET: str = Field(min_length=32)
     JWT_ALG: str = "HS256"
 
     AUTH_SERVICE_BASE_URL: Optional[HttpUrl] = None
     INTERNAL_API_TOKEN: Optional[str] = None
     AUTH_USER_EXISTS_PATH: str = "/internal/users/exists"
+
+    CORE_SERVICE_BASE_URL: Optional[HttpUrl] = None
+    CORE_INTERNAL_TOKEN: Optional[str] = None
 
     FILE_BASE_URL: str = "http://localhost:8000"
 

@@ -75,6 +75,7 @@ class KafkaService:
             True if message was sent successfully.
         """
         if not settings.KAFKA_BOOTSTRAP_SERVERS:
+            logger.debug("Kafka not configured, skipping message")
             return False
 
         if not self._started:
@@ -85,10 +86,12 @@ class KafkaService:
             return False
 
         message = json.dumps(payload).encode("utf-8")
+        logger.debug("Sending Kafka message to topic '%s': %s", topic, payload)
 
         for attempt in range(self._max_retries):
             try:
                 await self._producer.send_and_wait(topic, message)
+                logger.info("Successfully sent message to Kafka topic '%s'", topic)
                 return True
             except Exception as exc:
                 logger.warning(

@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi import status
 
@@ -166,7 +168,9 @@ async def test_get_file_unauthorized(client, test_file_metadata):
 @pytest.mark.asyncio
 async def test_list_files_success(authenticated_client, test_file_metadata):
     """Test successful file listing."""
-    response = await authenticated_client.get("/api/files/")
+    response = await authenticated_client.get(
+        "/api/files/?entity_type=user&entity_id=1"
+    )
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -192,7 +196,9 @@ async def test_list_files_with_filters(authenticated_client, test_file_metadata)
 @pytest.mark.asyncio
 async def test_list_files_pagination(authenticated_client, test_file_metadata):
     """Test file listing pagination."""
-    response = await authenticated_client.get("/api/files/?page=1&page_size=10")
+    response = await authenticated_client.get(
+        "/api/files/?entity_type=user&entity_id=1&page=1&page_size=10"
+    )
 
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
@@ -218,6 +224,7 @@ async def test_update_file_success(
     assert response.status_code == status.HTTP_200_OK
     response_data = response.json()
     assert response_data["id"] == test_file_metadata.id
+    assert response_data["original_filename"] == "updated.png"
 
 
 @pytest.mark.asyncio
@@ -343,9 +350,13 @@ async def test_upload_project_logo(authenticated_client, test_db, test_image_fil
         "entity_id": 1,
     }
 
-    response = await authenticated_client.post(
-        "/api/files/upload", files=files, data=data
-    )
+    with patch(
+        "app.core.permissions.CoreServiceClient.check_project_access",
+        new=AsyncMock(return_value=True),
+    ):
+        response = await authenticated_client.post(
+            "/api/files/upload", files=files, data=data
+        )
 
     assert response.status_code == status.HTTP_201_CREATED
     data = response.json()
@@ -364,9 +375,13 @@ async def test_upload_task_attachment(authenticated_client, test_db, test_image_
         "entity_id": 1,
     }
 
-    response = await authenticated_client.post(
-        "/api/files/upload", files=files, data=data
-    )
+    with patch(
+        "app.core.permissions.CoreServiceClient.check_task_access",
+        new=AsyncMock(return_value=True),
+    ):
+        response = await authenticated_client.post(
+            "/api/files/upload", files=files, data=data
+        )
 
     assert response.status_code == status.HTTP_201_CREATED
     data = response.json()
@@ -381,20 +396,17 @@ async def test_list_files_empty(authenticated_client, test_db):
         "/api/files/?entity_type=user&entity_id=999"
     )
 
-    assert response.status_code == status.HTTP_200_OK
-    data = response.json()
-    assert data["total"] == 0
-    assert data["files"] == []
+    assert response.status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.asyncio
 async def test_update_file_with_new_type(
     authenticated_client, test_file_metadata, test_image_file
 ):
-    """Test updating file with new file type."""
+    """PUT ignores extra file_type form field and keeps original type."""
     test_image_file.seek(0)
     files = {"file": ("updated.png", test_image_file, "image/png")}
-    data = {"file_type": "avatar"}
+    data = {"file_type": "task_logo"}
 
     response = await authenticated_client.put(
         f"/api/files/{test_file_metadata.id}",
@@ -405,6 +417,12 @@ async def test_update_file_with_new_type(
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["file_type"] == "avatar"
+
+
+@pytest.mark.asyncio
+async def test_list_files_requires_entity_params_for_non_admin(authenticated_client):
+    response = await authenticated_client.get("/api/files/")
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 @pytest.mark.asyncio

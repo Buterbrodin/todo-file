@@ -5,8 +5,9 @@ from fastapi import FastAPI
 
 from app.backend.db import engine
 from app.routers import files
+from app.services.core_client import close_http_client
 from app.services.kafka_service import kafka_service
-from app.services.s3_service import S3Service
+from app.services.s3_service import s3_service
 
 
 @asynccontextmanager
@@ -17,13 +18,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     Initializes S3 buckets and Kafka producer on startup,
     cleans up resources on shutdown.
     """
-    s3_service = S3Service()
     try:
         await kafka_service.start()
         await s3_service._ensure_buckets()
         yield
     finally:
         await kafka_service.stop()
+        await close_http_client()
         if engine:
             await engine.dispose()
 

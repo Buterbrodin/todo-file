@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.core.exceptions import S3ServiceError
 from app.services.s3_service import S3Service, infer_bucket
 
 
@@ -45,21 +46,21 @@ async def test_upload_file_success():
 
 @pytest.mark.asyncio
 async def test_upload_file_no_session():
-    """Test upload behavior when S3 session is not available."""
+    """Test upload raises error when S3 session is not available."""
     service = S3Service()
     file_content = BytesIO(b"test file content")
     file_key = "avatars/1/test.jpg"
     bucket = "avatars"
 
-    result = await service.upload_file(
-        file_content,
-        bucket=bucket,
-        key=file_key,
-        content_type="image/jpeg",
-    )
+    with pytest.raises(S3ServiceError) as exc_info:
+        await service.upload_file(
+            file_content,
+            bucket=bucket,
+            key=file_key,
+            content_type="image/jpeg",
+        )
 
-    assert result is not None
-    assert isinstance(result, str)
+    assert "unavailable" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -97,7 +98,9 @@ async def test_delete_file_no_session():
     bucket = "avatars"
     key = "avatars/1/test.jpg"
 
-    result = await service.delete_file(bucket=bucket, key=key)
+    with patch.object(service, "_ensure_session"):
+        service._session = None
+        result = await service.delete_file(bucket=bucket, key=key)
 
     assert result is False
 

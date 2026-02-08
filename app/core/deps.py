@@ -1,20 +1,28 @@
 from typing import Optional
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, HTTPException, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.db import get_db
 from app.core.security import UserPrincipal, decode_token
+from app.services.core_client import CoreServiceClient
+
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    scheme_name="BearerAuth",
+    description="JWT access token. Format: Bearer <token>",
+)
 
 
 async def get_current_user(
-    authorization: Optional[str] = Header(default=None, convert_underscores=False),
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(bearer_scheme),
 ) -> UserPrincipal:
     """
     Get current authenticated user from JWT token.
 
     Args:
-        authorization: Authorization header value.
+        credentials: Parsed Authorization header credentials.
 
     Returns:
         UserPrincipal with user information.
@@ -22,13 +30,12 @@ async def get_current_user(
     Raises:
         HTTPException: If not authenticated or token is invalid.
     """
-    if not authorization or not authorization.startswith("Bearer "):
+    if not credentials or credentials.scheme.lower() != "bearer":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
         )
-    token = authorization.split(" ", 1)[1]
-    return decode_token(token)
+    return decode_token(credentials.credentials)
 
 
 async def get_db_session(session: AsyncSession = Depends(get_db)) -> AsyncSession:
@@ -42,3 +49,22 @@ async def get_db_session(session: AsyncSession = Depends(get_db)) -> AsyncSessio
         AsyncSession instance.
     """
     return session
+
+
+def get_core_service_client() -> CoreServiceClient:
+    """
+    Get core service client dependency.
+
+    Returns:
+        CoreServiceClient instance.
+
+    Raises:
+        HTTPException: If core service is not configured.
+    """
+    try:
+        return CoreServiceClient()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Core service not configured",
+        ) from exc

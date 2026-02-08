@@ -1,1 +1,0 @@
-Generic Alembic environment. Initial migration to be generated via `alembic revision --autogenerate -m "create file_metadata table"`.

@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi import HTTPException
 
@@ -112,8 +114,36 @@ async def test_check_file_permission_project_file():
         url="http://test.com/test.jpg",
     )
 
-    result = await check_file_permission(user, file_meta, "read")
+    with patch(
+        "app.core.permissions.CoreServiceClient.check_project_access",
+        new=AsyncMock(return_value=True),
+    ):
+        result = await check_file_permission(user, file_meta, "read")
     assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_file_permission_project_file_denied():
+    user = UserPrincipal(user_id=1, roles=["member"], email="user@example.com")
+    file_meta = FileMetadata(
+        file_key="test.jpg",
+        file_type="project_logo",
+        entity_type="project",
+        entity_id=1,
+        original_filename="test.jpg",
+        content_type="image/jpeg",
+        file_size=1024,
+        bucket_name="project-logos",
+        url="http://test.com/test.jpg",
+    )
+
+    with patch(
+        "app.core.permissions.CoreServiceClient.check_project_access",
+        new=AsyncMock(return_value=False),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await check_file_permission(user, file_meta, "read")
+    assert exc_info.value.status_code == 403
 
 
 def test_validate_file_type_valid():
@@ -173,7 +203,11 @@ async def test_validate_entity_exists_admin():
 async def test_validate_entity_exists_project():
     """Test validation passes for project entity."""
     user = UserPrincipal(user_id=1, roles=["member"], email="user@example.com")
-    await validate_entity_exists("project", 1, user)
+    with patch(
+        "app.core.permissions.CoreServiceClient.check_project_access",
+        new=AsyncMock(return_value=True),
+    ):
+        await validate_entity_exists("project", 1, user)
 
 
 @pytest.mark.asyncio
