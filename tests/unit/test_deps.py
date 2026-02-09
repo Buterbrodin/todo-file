@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import jwt
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.core.deps import get_current_user
@@ -75,7 +75,9 @@ async def test_get_current_user_empty_bearer():
 @pytest.mark.asyncio
 async def test_get_current_user_token_decode_error():
     with patch("app.core.deps.decode_token") as mock_decode:
-        mock_decode.side_effect = HTTPException(status_code=401, detail="Invalid token")
+        mock_decode.side_effect = HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token"
+        )
 
         with pytest.raises(HTTPException) as exc_info:
             await get_current_user(
