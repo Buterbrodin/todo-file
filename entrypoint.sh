@@ -13,4 +13,7 @@ until alembic upgrade head; do
   sleep 3
 done
 
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+# Single worker: the Kafka consumer runs inside the asyncio event loop.
+# Multiple workers would spawn duplicate consumers in the same group
+# and add unnecessary overhead for single-partition topics.
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1

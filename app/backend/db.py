@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
 from sqlalchemy.ext.asyncio import (
@@ -6,11 +7,14 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 
 from app.settings import settings
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
+
 
 engine: Optional[AsyncEngine] = None
 AsyncSessionLocal: Optional[async_sessionmaker[AsyncSession]] = None
@@ -53,6 +57,23 @@ def get_engine() -> AsyncEngine:
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """
     Get database session dependency.
+
+    Yields:
+        AsyncSession for database operations.
+    """
+    ensure_engine()
+    assert AsyncSessionLocal is not None
+    async with AsyncSessionLocal() as session:
+        yield session
+
+
+@asynccontextmanager
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Async context manager for database session.
+
+    Use this outside of FastAPI dependency injection context
+    (e.g., in Kafka consumers).
 
     Yields:
         AsyncSession for database operations.

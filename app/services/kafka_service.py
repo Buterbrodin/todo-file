@@ -86,12 +86,11 @@ class KafkaService:
             return False
 
         message = json.dumps(payload).encode("utf-8")
-        logger.debug("Sending Kafka message to topic '%s': %s", topic, payload)
 
         for attempt in range(self._max_retries):
             try:
                 await self._producer.send_and_wait(topic, message)
-                logger.info("Successfully sent message to Kafka topic '%s'", topic)
+                logger.debug("Successfully sent message to Kafka topic '%s'", topic)
                 return True
             except Exception as exc:
                 logger.warning(

@@ -32,8 +32,8 @@ async def test_check_file_permission_admin():
         url="http://test.com/test.jpg",
     )
 
-    result = await check_file_permission(user, file_meta, "read")
-    assert result is True
+    # Admin has access — should not raise
+    await check_file_permission(user, file_meta, "read")
 
 
 @pytest.mark.asyncio
@@ -52,8 +52,8 @@ async def test_check_file_permission_own_avatar():
         url="http://test.com/test.jpg",
     )
 
-    result = await check_file_permission(user, file_meta, "read")
-    assert result is True
+    # Own avatar — should not raise
+    await check_file_permission(user, file_meta, "read")
 
 
 @pytest.mark.asyncio
@@ -118,8 +118,8 @@ async def test_check_file_permission_project_file():
         "app.core.permissions.CoreServiceClient.check_project_access",
         new=AsyncMock(return_value=True),
     ):
-        result = await check_file_permission(user, file_meta, "read")
-    assert result is True
+        # Should not raise
+        await check_file_permission(user, file_meta, "read")
 
 
 @pytest.mark.asyncio
@@ -245,33 +245,29 @@ def test_validate_file_size_too_large():
     assert exc_info.value.status_code == 400
 
 
-@pytest.mark.asyncio
-async def test_validate_file_magic_bytes_png():
+def test_validate_file_magic_bytes_png():
     """Test validation passes for valid PNG magic bytes."""
     png_magic = b"\x89PNG\r\n\x1a\n" + b"0" * 8
-    await validate_file_magic_bytes(png_magic, "image/png")
+    validate_file_magic_bytes(png_magic, "image/png")
 
 
-@pytest.mark.asyncio
-async def test_validate_file_magic_bytes_jpeg():
+def test_validate_file_magic_bytes_jpeg():
     """Test validation passes for valid JPEG magic bytes."""
     jpeg_magic = b"\xff\xd8\xff" + b"0" * 13
-    await validate_file_magic_bytes(jpeg_magic, "image/jpeg")
+    validate_file_magic_bytes(jpeg_magic, "image/jpeg")
 
 
-@pytest.mark.asyncio
-async def test_validate_file_magic_bytes_invalid():
+def test_validate_file_magic_bytes_invalid():
     """Test validation fails for invalid file content."""
     invalid_content = b"not an image"
 
     with pytest.raises(HTTPException) as exc_info:
-        await validate_file_magic_bytes(invalid_content, "image/png")
+        validate_file_magic_bytes(invalid_content, "image/png")
     assert exc_info.value.status_code == 400
 
 
-@pytest.mark.asyncio
-async def test_validate_file_magic_bytes_empty():
+def test_validate_file_magic_bytes_empty():
     """Test validation fails for empty file."""
     with pytest.raises(HTTPException) as exc_info:
-        await validate_file_magic_bytes(b"", "image/png")
+        validate_file_magic_bytes(b"", "image/png")
     assert exc_info.value.status_code == 400

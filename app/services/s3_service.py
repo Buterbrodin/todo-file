@@ -107,7 +107,7 @@ class S3Service:
                     key,
                     ExtraArgs={"ContentType": content_type},
                 )
-            logger.info("Uploaded file to s3://%s/%s", bucket, key)
+            logger.debug("Uploaded file to s3://%s/%s", bucket, key)
         except (AttributeError, TypeError) as exc:
             logger.error("Invalid file object: %s", exc)
             raise S3ServiceError(f"Invalid file object: {exc}") from exc
@@ -136,7 +136,7 @@ class S3Service:
         try:
             async with self._session.client("s3", **self._get_client_config()) as s3:
                 await s3.delete_object(Bucket=bucket, Key=key)
-            logger.info("Deleted file from s3://%s/%s", bucket, key)
+            logger.debug("Deleted file from s3://%s/%s", bucket, key)
             return True
         except (AttributeError, TypeError) as exc:
             logger.error("Invalid bucket or key format: %s", exc)

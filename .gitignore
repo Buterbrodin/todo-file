@@ -28,3 +28,7 @@ dist/
 build/
 *.egg-info/
 docker-compose.prod.yml
+
+# Debug artifacts
+KAFKA_STATUS_REPORT.md
+test_kafka_connection.py

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.file import FileListResponse, FileResponse, FileUpdate, FileUpload
+from app.schemas.file import FileListResponse, FileResponse, FileUpload
 
 
 class TestFileUpload:
@@ -23,18 +23,6 @@ class TestFileUpload:
             FileUpload(file_type="avatar")
 
 
-class TestFileUpdate:
-    def test_file_update_with_type(self):
-        schema = FileUpdate(file_type="project_logo")
-
-        assert schema.file_type == "project_logo"
-
-    def test_file_update_empty(self):
-        schema = FileUpdate()
-
-        assert schema.file_type is None
-
-
 class TestFileResponse:
     def test_file_response_valid(self):
         now = datetime.now(timezone.utc)
@@ -45,6 +33,7 @@ class TestFileResponse:
             file_type="avatar",
             entity_type="user",
             entity_id=1,
+            uploader_id=1,
             original_filename="test.jpg",
             content_type="image/jpeg",
             file_size=1024,
@@ -79,6 +68,7 @@ class TestFileListResponse:
             file_type="avatar",
             entity_type="user",
             entity_id=1,
+            uploader_id=1,
             original_filename="test.jpg",
             content_type="image/jpeg",
             file_size=1024,

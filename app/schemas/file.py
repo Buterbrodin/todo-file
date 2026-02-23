@@ -12,12 +12,6 @@ class FileUpload(BaseModel):
     entity_id: int
 
 
-class FileUpdate(BaseModel):
-    """Schema for file update request parameters."""
-
-    file_type: Optional[str] = None
-
-
 class FileResponse(BaseModel):
     """Schema for file metadata response."""
 
@@ -27,6 +21,7 @@ class FileResponse(BaseModel):
     file_type: str
     entity_type: str
     entity_id: int
+    uploader_id: Optional[int]
     original_filename: str
     content_type: str
     file_size: int

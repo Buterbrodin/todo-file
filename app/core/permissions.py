@@ -1,15 +1,13 @@
 import logging
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import HTTPException, status
 
 from app.core.exceptions import CoreServiceError
 from app.core.security import UserPrincipal
-from app.models.file import FileMetadata
+from app.models.file import EntityType, FileMetadata, FileType
 from app.services.core_client import CoreServiceClient
 
-VALID_FILE_TYPES = {"avatar", "project_logo", "task_logo", "task_attachment"}
-VALID_ENTITY_TYPES = {"user", "project", "task"}
 logger = logging.getLogger(__name__)
 
 
@@ -17,27 +15,24 @@ async def check_file_permission(
     user: UserPrincipal,
     file_meta: FileMetadata,
     action: Literal["read", "write", "delete"] = "read",
-) -> bool:
+) -> None:
     """
-    Check if user has permission to perform action on file.
+    Assert that user has permission to perform action on file.
 
     Args:
         user: Current authenticated user.
         file_meta: File metadata object.
         action: Action to perform (read, write, delete).
 
-    Returns:
-        True if permission granted.
-
     Raises:
         HTTPException: If permission denied.
     """
     if user.is_admin:
-        return True
+        return
 
-    if file_meta.entity_type == "user":
+    if file_meta.entity_type == EntityType.user:
         if file_meta.entity_id == user.id:
-            return True
+            return
         if action != "read":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -48,7 +43,7 @@ async def check_file_permission(
             detail="You cannot view other users' avatars",
         )
 
-    if file_meta.entity_type == "project":
+    if file_meta.entity_type == EntityType.project:
         try:
             core_client = CoreServiceClient()
             has_access = await core_client.check_project_access(
@@ -59,14 +54,14 @@ async def check_file_permission(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access denied to project",
                 )
-            return True
+            return
         except CoreServiceError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Core service unavailable",
             ) from exc
 
-    if file_meta.entity_type == "task":
+    if file_meta.entity_type == EntityType.task:
         try:
             core_client = CoreServiceClient()
             has_access = await core_client.check_task_access(
@@ -77,7 +72,7 @@ async def check_file_permission(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access denied to task",
                 )
-            return True
+            return
         except CoreServiceError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -90,6 +85,69 @@ async def check_file_permission(
     )
 
 
+async def check_list_files_access(
+    user: UserPrincipal,
+    entity_type: Optional[str],
+    entity_id: Optional[int],
+) -> None:
+    """
+    Check if user has access to list files for the given entity.
+
+    Args:
+        user: Current authenticated user.
+        entity_type: Type of entity.
+        entity_id: ID of the entity.
+
+    Raises:
+        HTTPException: If access is denied.
+    """
+    if user.is_admin:
+        return
+
+    if not entity_type or entity_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="entity_type and entity_id are required for non-admin listing",
+        )
+
+    if entity_type == EntityType.user:
+        if entity_id != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to user files",
+            )
+    elif entity_type == EntityType.project:
+        try:
+            has_access = await CoreServiceClient().check_project_access(
+                user.id, entity_id, "read", user.email
+            )
+        except CoreServiceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Core service unavailable",
+            ) from exc
+        if not has_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to project",
+            )
+    elif entity_type == EntityType.task:
+        try:
+            has_access = await CoreServiceClient().check_task_access(
+                user.id, entity_id, "read", user.email
+            )
+        except CoreServiceError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Core service unavailable",
+            ) from exc
+        if not has_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied to task",
+            )
+
+
 def validate_file_type(file_type: str) -> None:
     """
     Validate that file_type is one of allowed values.
@@ -100,10 +158,11 @@ def validate_file_type(file_type: str) -> None:
     Raises:
         HTTPException: If file_type is invalid.
     """
-    if file_type not in VALID_FILE_TYPES:
+    if file_type not in {e.value for e in FileType}:
+        allowed = ", ".join(sorted(e.value for e in FileType))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid file_type. Allowed: {', '.join(sorted(VALID_FILE_TYPES))}",
+            detail=f"Invalid file_type. Allowed: {allowed}",
         )
 
 
@@ -117,8 +176,8 @@ def validate_entity_type(entity_type: str) -> None:
     Raises:
         HTTPException: If entity_type is invalid.
     """
-    if entity_type not in VALID_ENTITY_TYPES:
-        allowed = ", ".join(sorted(VALID_ENTITY_TYPES))
+    if entity_type not in {e.value for e in EntityType}:
+        allowed = ", ".join(sorted(e.value for e in EntityType))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid entity_type. Allowed: {allowed}",
@@ -147,14 +206,14 @@ async def validate_entity_exists(
             detail="Invalid entity_id",
         )
 
-    if entity_type == "user":
+    if entity_type == EntityType.user:
         if entity_id != user.id and not user.is_admin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only upload files for yourself",
             )
 
-    if entity_type == "project":
+    if entity_type == EntityType.project:
         try:
             core_client = CoreServiceClient()
             has_access = await core_client.check_project_access(
@@ -172,7 +231,7 @@ async def validate_entity_exists(
                 detail="Core service unavailable",
             ) from exc
 
-    if entity_type == "task":
+    if entity_type == EntityType.task:
         try:
             core_client = CoreServiceClient()
             has_access = await core_client.check_task_access(
@@ -252,7 +311,7 @@ def _detect_webp(file_content: bytes) -> bool:
     return file_content.startswith(b"RIFF") and file_content[8:12] == b"WEBP"
 
 
-async def validate_file_magic_bytes(
+def validate_file_magic_bytes(
     file_content: bytes,
     declared_content_type: str | None,
 ) -> None:

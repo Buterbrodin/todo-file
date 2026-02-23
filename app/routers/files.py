@@ -17,9 +17,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import UserPrincipal, get_current_user, get_db_session
-from app.core.exceptions import CoreServiceError, S3ServiceError
+from app.core.exceptions import S3ServiceError
 from app.core.permissions import (
     check_file_permission,
+    check_list_files_access,
     validate_content_type,
     validate_entity_exists,
     validate_entity_type,
@@ -29,7 +30,6 @@ from app.core.permissions import (
 )
 from app.models.file import FileMetadata
 from app.schemas.file import FileListResponse, FileResponse
-from app.services.core_client import CoreServiceClient
 from app.services.kafka_service import kafka_service
 from app.services.s3_service import S3Service, infer_bucket, s3_service
 from app.settings import settings
@@ -42,69 +42,6 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 def get_s3_service() -> S3Service:
     """Dependency for S3 service."""
     return s3_service
-
-
-async def check_list_files_access(
-    user: UserPrincipal,
-    entity_type: Optional[str],
-    entity_id: Optional[int],
-) -> None:
-    """
-    Check if user has access to list files for the given entity.
-
-    Args:
-        user: Current authenticated user.
-        entity_type: Type of entity.
-        entity_id: ID of the entity.
-
-    Raises:
-        HTTPException: If access is denied.
-    """
-    if user.is_admin:
-        return
-
-    if not entity_type or entity_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="entity_type and entity_id are required for non-admin listing",
-        )
-
-    if entity_type == "user":
-        if entity_id != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied to user files",
-            )
-    elif entity_type == "project":
-        try:
-            has_access = await CoreServiceClient().check_project_access(
-                user.id, entity_id, "read", user.email
-            )
-        except CoreServiceError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Core service unavailable",
-            ) from exc
-        if not has_access:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied to project",
-            )
-    elif entity_type == "task":
-        try:
-            has_access = await CoreServiceClient().check_task_access(
-                user.id, entity_id, "read", user.email
-            )
-        except CoreServiceError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Core service unavailable",
-            ) from exc
-        if not has_access:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied to task",
-            )
 
 
 async def get_file_size(file: UploadFile) -> int:
@@ -137,13 +74,13 @@ async def upload_file(
     file: UploadFile = File(...),
     file_type: str = Form("task_attachment"),
     entity_type: str = Form("task"),
-    entity_id: int = Form(0),
+    entity_id: int = Form(...),
     db: AsyncSession = Depends(get_db_session),
     user: UserPrincipal = Depends(get_current_user),
     s3_service: S3Service = Depends(get_s3_service),
 ) -> FileMetadata:
     """
-    Upload a new file.
+    Upload a new file via HTTP API.
 
     Args:
         file: File to upload.
@@ -169,7 +106,7 @@ async def upload_file(
     file_content = await file.read()
     await file.seek(0)
 
-    await validate_file_magic_bytes(file_content[:16], file.content_type)
+    validate_file_magic_bytes(file_content[:16], file.content_type)
 
     bucket = infer_bucket(file_type)
     key = f"{file_type}/{entity_type}/{entity_id}/{uuid4().hex}_{file.filename}"
@@ -195,6 +132,7 @@ async def upload_file(
         file_type=file_type,
         entity_type=entity_type,
         entity_id=entity_id,
+        uploader_id=user.id,
         original_filename=file.filename or "unknown",
         content_type=content_type,
         file_size=len(file_content),
@@ -264,7 +202,7 @@ async def list_files(
     user: UserPrincipal = Depends(get_current_user),
 ) -> FileListResponse:
     """
-    List files with optional filters.
+    List files with optional filters via HTTP API.
 
     Args:
         entity_type: Filter by entity type.
@@ -318,7 +256,7 @@ async def update_file(
     s3_service: S3Service = Depends(get_s3_service),
 ) -> FileMetadata:
     """
-    Update an existing file.
+    Update an existing file via HTTP API.
 
     Args:
         file_id: File ID to update.
@@ -357,7 +295,7 @@ async def update_file(
     file_content = await file.read()
     await file.seek(0)
 
-    await validate_file_magic_bytes(file_content[:16], file.content_type)
+    validate_file_magic_bytes(file_content[:16], file.content_type)
 
     bucket = meta.bucket_name
     key = meta.file_key
@@ -404,7 +342,7 @@ async def delete_file(
     s3_service: S3Service = Depends(get_s3_service),
 ) -> dict[str, str]:
     """
-    Delete a file (soft delete).
+    Delete a file (soft delete) via HTTP API.
 
     Args:
         file_id: File ID to delete.

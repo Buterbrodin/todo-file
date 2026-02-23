@@ -16,3 +16,4 @@ tests
 *.log
 localstack_data
 file_postgres_data
+.env

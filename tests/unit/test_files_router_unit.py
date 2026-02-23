@@ -56,7 +56,7 @@ async def test_list_files_non_admin_project_denied():
     db = AsyncMock()
 
     with patch(
-        "app.routers.files.CoreServiceClient.check_project_access",
+        "app.core.permissions.CoreServiceClient.check_project_access",
         new=AsyncMock(return_value=False),
     ):
         with pytest.raises(HTTPException) as exc_info:

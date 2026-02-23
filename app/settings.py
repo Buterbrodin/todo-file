@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_FILE_UPLOADED: str = "file.uploaded"
     KAFKA_TOPIC_FILE_DELETED: str = "file.deleted"
     KAFKA_TOPIC_FILE_UPDATED: str = "file.updated"
+    KAFKA_TOPIC_FILE_UPLOAD_REQUEST: str = "file.upload.request"
+    KAFKA_TOPIC_FILE_UPLOAD_RESPONSE: str = "file.upload.response"
+    KAFKA_TOPIC_FILE_DELETE_REQUEST: str = "file.delete.request"
+    KAFKA_TOPIC_FILE_DELETE_RESPONSE: str = "file.delete.response"
+    KAFKA_TOPIC_FILE_LIST_REQUEST: str = "file.list.request"
+    KAFKA_TOPIC_FILE_LIST_RESPONSE: str = "file.list.response"
 
     JWT_SECRET: str = Field(min_length=32)
     JWT_ALG: str = "HS256"
@@ -60,7 +66,7 @@ class Settings(BaseSettings):
     CORE_SERVICE_BASE_URL: Optional[HttpUrl] = None
     CORE_INTERNAL_TOKEN: Optional[str] = None
 
-    FILE_BASE_URL: str = "http://localhost:8000"
+    FILE_BASE_URL: str = "http://localhost:8002"
 
     ENV: Literal["local", "dev", "prod", "test"] = "local"
 

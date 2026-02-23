@@ -52,15 +52,17 @@ async def test_upload_file_no_session():
     file_key = "avatars/1/test.jpg"
     bucket = "avatars"
 
-    with pytest.raises(S3ServiceError) as exc_info:
-        await service.upload_file(
-            file_content,
-            bucket=bucket,
-            key=file_key,
-            content_type="image/jpeg",
-        )
+    with patch.object(service, "_ensure_session"):
+        service._session = None
+        with pytest.raises(S3ServiceError) as exc_info:
+            await service.upload_file(
+                file_content,
+                bucket=bucket,
+                key=file_key,
+                content_type="image/jpeg",
+            )
 
-    assert "unavailable" in str(exc_info.value).lower()
+        assert "unavailable" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
