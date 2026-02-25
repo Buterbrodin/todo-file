@@ -8,7 +8,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://todo_files:todo_files@file_db:5432/todo_files
       DATABASE_URL_SYNC: postgresql+psycopg://todo_files:todo_files@file_db:5432/todo_files
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       S3_ENDPOINT_URL: http://localstack:4566
       FILE_BASE_URL: http://file_app:8000
     ports:

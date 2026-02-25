@@ -7,12 +7,14 @@ from io import BytesIO
 from typing import Any, Optional
 from uuid import uuid4
 
+from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from app.backend.db import get_db_session
 from app.core.exceptions import S3ServiceError
 from app.core.permissions import (
     check_file_permission,
+    check_list_files_access,
     validate_content_type,
     validate_entity_exists,
     validate_entity_type,
@@ -288,11 +290,28 @@ class KafkaRequestConsumer:
                     "request_id": request_id,
                 }
             )
+            await self._send_upload_success(
+                request_id=request_id,
+                file_id=meta.id,
+                file_type=file_type,
+                entity_type=entity_type,
+                entity_id=entity_id,
+                url=meta.url,
+                timestamp=meta.created_at.isoformat() if meta.created_at else None,
+                user_id=user_id,
+            )
             logger.debug(
                 "File uploaded via Kafka: file_id=%s, request_id=%s",
                 meta.id,
                 request_id,
             )
+        except HTTPException as exc:
+            logger.warning(
+                "Upload request validation failed: request_id=%s, detail=%s",
+                request_id,
+                exc.detail,
+            )
+            await self._send_upload_error(request_id, str(exc.detail))
         except Exception as exc:
             logger.error("Error processing upload request: %s", exc, exc_info=True)
             await self._send_upload_error(request_id, "Internal error during upload")
@@ -323,11 +342,16 @@ class KafkaRequestConsumer:
                 )
                 return
 
-            file_id = payload.get("file_id")
-            if not all([request_id, file_id]):
+            file_id_raw = payload.get("file_id")
+            if (
+                not isinstance(request_id, str)
+                or not request_id
+                or not isinstance(file_id_raw, int)
+            ):
                 logger.warning("Invalid delete request: missing required fields")
                 await self._send_delete_error(request_id, "Missing required fields")
                 return
+            file_id = file_id_raw
 
             async with get_db_session() as db:
                 res = await db.execute(
@@ -377,6 +401,15 @@ class KafkaRequestConsumer:
                     "request_id": request_id,
                 }
             )
+            await self._send_delete_success(
+                request_id=request_id,
+                file_id=file_id,
+                file_type=meta.file_type,
+                entity_type=meta.entity_type,
+                entity_id=meta.entity_id,
+                timestamp=deleted_at.isoformat(),
+                user_id=user.id,
+            )
             logger.debug(
                 "File deleted via Kafka: file_id=%s, request_id=%s",
                 file_id,
@@ -425,22 +458,6 @@ class KafkaRequestConsumer:
 
         return query, total
 
-    async def _filter_files_by_permission(
-        self, user: UserPrincipal, files: list[FileMetadata]
-    ) -> list[FileMetadata]:
-        """Filter files by user permissions."""
-        if user.is_admin:
-            return files
-
-        filtered_files = []
-        for f in files:
-            try:
-                await check_file_permission(user, f, "read")
-                filtered_files.append(f)
-            except Exception:
-                continue
-        return filtered_files
-
     async def _handle_list_request(self, payload: dict) -> None:
         """
         Handle file list request.
@@ -465,13 +482,12 @@ class KafkaRequestConsumer:
             page = payload.get("page", 1)
             page_size = payload.get("page_size", 20)
 
-            if entity_type and entity_id:
-                try:
-                    await validate_entity_exists(entity_type, entity_id, user)
-                except Exception as exc:
-                    logger.warning("Entity validation failed: %s", exc)
-                    await self._send_list_error(request_id, "Access denied")
-                    return
+            if entity_type:
+                validate_entity_type(entity_type)
+            if file_type:
+                validate_file_type(file_type)
+
+            await check_list_files_access(user, entity_type, entity_id)
 
             async with get_db_session() as db:
                 query, total = await self._build_list_query(
@@ -486,8 +502,7 @@ class KafkaRequestConsumer:
                 )
 
                 result = await db.execute(query)
-                files_list = list(result.scalars().all())
-                files = await self._filter_files_by_permission(user, files_list)
+                files = list(result.scalars().all())
 
             files_data = [
                 {
@@ -521,9 +536,44 @@ class KafkaRequestConsumer:
                 request_id,
                 len(files_data),
             )
+        except HTTPException as exc:
+            logger.warning(
+                "List request validation failed: request_id=%s, detail=%s",
+                request_id,
+                exc.detail,
+            )
+            await self._send_list_error(request_id, str(exc.detail))
         except Exception as exc:
             logger.error("Error processing list request: %s", exc, exc_info=True)
             await self._send_list_error(request_id, "Internal error during list")
+
+    async def _send_upload_success(
+        self,
+        request_id: str,
+        file_id: int,
+        file_type: str,
+        entity_type: str,
+        entity_id: int,
+        url: str,
+        timestamp: Optional[str],
+        user_id: int,
+    ) -> None:
+        """Send upload success response to Kafka."""
+        await kafka_service._send(
+            settings.KAFKA_TOPIC_FILE_UPLOAD_RESPONSE,
+            {
+                "event": "file.upload.response",
+                "status": "ok",
+                "request_id": request_id,
+                "file_id": file_id,
+                "file_type": file_type,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "url": url,
+                "timestamp": timestamp,
+                "user_id": user_id,
+            },
+        )
 
     async def _send_upload_error(self, request_id: Optional[str], detail: str) -> None:
         """Send upload error response to Kafka."""
@@ -534,6 +584,32 @@ class KafkaRequestConsumer:
                 "status": "error",
                 "request_id": request_id,
                 "detail": detail,
+            },
+        )
+
+    async def _send_delete_success(
+        self,
+        request_id: str,
+        file_id: int,
+        file_type: str,
+        entity_type: str,
+        entity_id: int,
+        timestamp: str,
+        user_id: int,
+    ) -> None:
+        """Send delete success response to Kafka."""
+        await kafka_service._send(
+            settings.KAFKA_TOPIC_FILE_DELETE_RESPONSE,
+            {
+                "event": "file.delete.response",
+                "status": "ok",
+                "request_id": request_id,
+                "file_id": file_id,
+                "file_type": file_type,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "timestamp": timestamp,
+                "user_id": user_id,
             },
         )
 

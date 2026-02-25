@@ -5,7 +5,7 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.backend.db import engine
+from app.backend import db
 from app.core.deps import get_db_session
 from app.routers import files
 from app.services.core_client import close_http_client
@@ -25,14 +25,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         await kafka_service.start()
         await kafka_request_consumer.start()
+        s3_service._ensure_session()
         await s3_service._ensure_buckets()
         yield
     finally:
         await kafka_request_consumer.stop()
         await kafka_service.stop()
         await close_http_client()
-        if engine:
-            await engine.dispose()
+        if db.engine:
+            await db.engine.dispose()
 
 
 app = FastAPI(title="todo-files", lifespan=lifespan)

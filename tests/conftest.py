@@ -105,6 +105,7 @@ def integration_external_services_stub(request, monkeypatch):
     monkeypatch.setattr("app.services.s3_service.s3_service.delete_file", _delete_file)
     monkeypatch.setattr("app.services.core_client.get_http_client", _get_http_client)
     monkeypatch.setattr("app.services.core_client.close_http_client", AsyncMock())
+    monkeypatch.setattr("app.main.s3_service._ensure_session", lambda: None)
     monkeypatch.setattr("app.main.s3_service._ensure_buckets", AsyncMock())
     monkeypatch.setattr("app.main.kafka_service.start", AsyncMock())
     monkeypatch.setattr("app.main.kafka_service.stop", AsyncMock())

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from app.core.security import UserPrincipal
 from app.models.file import FileMetadata
@@ -138,7 +139,13 @@ async def test_handle_upload_request_success(
                     uploaded_call = next(
                         (c for c in call_args if "file.uploaded" in str(c)), None
                     )
+                    response_call = next(
+                        (c for c in call_args if "file.upload.response" in str(c)), None
+                    )
                     assert uploaded_call is not None
+                    assert response_call is not None
+                    assert response_call[0][1]["status"] == "ok"
+                    assert response_call[0][1]["request_id"] == request_id
 
 
 @pytest.mark.asyncio
@@ -226,6 +233,47 @@ async def test_handle_upload_request_missing_fields(
 
 
 @pytest.mark.asyncio
+async def test_handle_upload_request_validation_error_detail(
+    kafka_consumer: KafkaRequestConsumer,
+    test_user: UserPrincipal,
+):
+    """Test upload request returns HTTPException detail from validators."""
+    payload = {
+        "request_id": "test-request-123",
+        "token": "valid-token",
+        "file_data": base64.b64encode(b"test").decode("utf-8"),
+        "file_type": "avatar",
+        "entity_type": "user",
+        "entity_id": 1,
+        "content_type": "image/invalid",
+    }
+
+    with patch(
+        "app.services.kafka_request_consumer.decode_token", return_value=test_user
+    ):
+        with patch(
+            "app.services.kafka_request_consumer.validate_entity_exists",
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "app.services.kafka_request_consumer.validate_content_type",
+                side_effect=HTTPException(
+                    status_code=400, detail="Invalid content type"
+                ),
+            ):
+                with patch(
+                    "app.services.kafka_request_consumer.kafka_service._send",
+                    new_callable=AsyncMock,
+                ) as mock_kafka_send:
+                    await kafka_consumer._handle_upload_request(payload)
+
+                    assert mock_kafka_send.called
+                    response_payload = mock_kafka_send.call_args[0][1]
+                    assert response_payload["status"] == "error"
+                    assert response_payload["detail"] == "Invalid content type"
+
+
+@pytest.mark.asyncio
 async def test_handle_delete_request_success(
     kafka_consumer: KafkaRequestConsumer,
     test_user: UserPrincipal,
@@ -294,7 +342,14 @@ async def test_handle_delete_request_success(
                         deleted_call = next(
                             (c for c in call_args if "file.deleted" in str(c)), None
                         )
+                        response_call = next(
+                            (c for c in call_args if "file.delete.response" in str(c)),
+                            None,
+                        )
                         assert deleted_call is not None
+                        assert response_call is not None
+                        assert response_call[0][1]["status"] == "ok"
+                        assert response_call[0][1]["request_id"] == request_id
 
 
 @pytest.mark.asyncio
@@ -391,27 +446,25 @@ async def test_handle_list_request_success(
             side_effect=get_mock_session,
         ):
             with patch(
-                "app.services.kafka_request_consumer.validate_entity_exists",
+                "app.services.kafka_request_consumer.check_list_files_access",
                 new_callable=AsyncMock,
-            ):
+            ) as mock_check_access:
                 with patch(
-                    "app.services.kafka_request_consumer.check_file_permission",
+                    "app.services.kafka_request_consumer.kafka_service._send",
                     new_callable=AsyncMock,
-                ):
-                    with patch(
-                        "app.services.kafka_request_consumer.kafka_service._send",
-                        new_callable=AsyncMock,
-                    ) as mock_kafka_send:
-                        await kafka_consumer._handle_list_request(payload)
+                ) as mock_kafka_send:
+                    await kafka_consumer._handle_list_request(payload)
 
-                        # Verify list response was sent
-                        assert mock_kafka_send.called
-                        call_args = mock_kafka_send.call_args
-                        assert "file.list.response" in str(call_args[0][0])
-                        response_payload = call_args[0][1]
-                        assert response_payload["status"] == "ok"
-                        assert "files" in response_payload
-                        assert response_payload["request_id"] == request_id
+                    mock_check_access.assert_called_once_with(test_user, "user", 1)
+                    # Verify list response was sent
+                    assert mock_kafka_send.called
+                    call_args = mock_kafka_send.call_args
+                    assert "file.list.response" in str(call_args[0][0])
+                    response_payload = call_args[0][1]
+                    assert response_payload["status"] == "ok"
+                    assert "files" in response_payload
+                    assert response_payload["request_id"] == request_id
+                    assert response_payload["total"] == 1
 
 
 @pytest.mark.asyncio
@@ -485,6 +538,33 @@ async def test_send_upload_error(kafka_consumer: KafkaRequestConsumer):
 
 
 @pytest.mark.asyncio
+async def test_send_upload_success(kafka_consumer: KafkaRequestConsumer):
+    """Test sending upload success response."""
+    with patch(
+        "app.services.kafka_request_consumer.kafka_service._send",
+        new_callable=AsyncMock,
+    ) as mock_kafka_send:
+        await kafka_consumer._send_upload_success(
+            request_id="test-request-123",
+            file_id=1,
+            file_type="avatar",
+            entity_type="user",
+            entity_id=1,
+            url="http://test-s3/avatars/test.png",
+            timestamp="2025-01-01T00:00:00+00:00",
+            user_id=1,
+        )
+
+        assert mock_kafka_send.called
+        call_args = mock_kafka_send.call_args
+        assert settings.KAFKA_TOPIC_FILE_UPLOAD_RESPONSE in str(call_args[0][0])
+        response_payload = call_args[0][1]
+        assert response_payload["status"] == "ok"
+        assert response_payload["event"] == "file.upload.response"
+        assert response_payload["request_id"] == "test-request-123"
+
+
+@pytest.mark.asyncio
 async def test_send_delete_error(kafka_consumer: KafkaRequestConsumer):
     """Test sending delete error response."""
     request_id = "test-request-123"
@@ -503,6 +583,32 @@ async def test_send_delete_error(kafka_consumer: KafkaRequestConsumer):
         assert response_payload["status"] == "error"
         assert response_payload["request_id"] == request_id
         assert response_payload["detail"] == detail
+
+
+@pytest.mark.asyncio
+async def test_send_delete_success(kafka_consumer: KafkaRequestConsumer):
+    """Test sending delete success response."""
+    with patch(
+        "app.services.kafka_request_consumer.kafka_service._send",
+        new_callable=AsyncMock,
+    ) as mock_kafka_send:
+        await kafka_consumer._send_delete_success(
+            request_id="test-request-123",
+            file_id=1,
+            file_type="avatar",
+            entity_type="user",
+            entity_id=1,
+            timestamp="2025-01-01T00:00:00+00:00",
+            user_id=1,
+        )
+
+        assert mock_kafka_send.called
+        call_args = mock_kafka_send.call_args
+        assert settings.KAFKA_TOPIC_FILE_DELETE_RESPONSE in str(call_args[0][0])
+        response_payload = call_args[0][1]
+        assert response_payload["status"] == "ok"
+        assert response_payload["event"] == "file.delete.response"
+        assert response_payload["request_id"] == "test-request-123"
 
 
 @pytest.mark.asyncio
