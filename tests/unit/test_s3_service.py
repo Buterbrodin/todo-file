@@ -182,6 +182,84 @@ async def test_ensure_buckets():
         assert service._buckets_initialized is True
 
 
+@pytest.mark.asyncio
+async def test_ensure_buckets_partial_failure_keeps_uninitialized():
+    """Test partial bucket creation failure does not mark initialized."""
+    service = S3Service()
+
+    mock_s3_client = AsyncMock()
+    mock_s3_client.head_bucket.side_effect = Exception("Not found")
+    mock_s3_client.create_bucket.side_effect = [
+        None,
+        Exception("create failed"),
+        None,
+        None,
+    ]
+    mock_context = MagicMock()
+    mock_context.__aenter__ = AsyncMock(return_value=mock_s3_client)
+    mock_context.__aexit__ = AsyncMock(return_value=None)
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_context
+
+    service._session = mock_session
+
+    with patch("app.services.s3_service.settings") as mock_settings:
+        mock_settings.S3_ENDPOINT_URL = "http://localstack:4566"
+        mock_settings.S3_ACCESS_KEY_ID = "test"
+        mock_settings.S3_SECRET_ACCESS_KEY = "test"
+        mock_settings.S3_REGION = "us-east-1"
+        mock_settings.S3_BUCKET_AVATARS = "avatars"
+        mock_settings.S3_BUCKET_PROJECT_LOGOS = "project-logos"
+        mock_settings.S3_BUCKET_TASK_LOGOS = "task-logos"
+        mock_settings.S3_BUCKET_TASK_ATTACHMENTS = "task-attachments"
+
+        await service._ensure_buckets()
+
+        assert service._buckets_initialized is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_buckets_retries_after_partial_failure():
+    """Test bucket initialization retries on subsequent call after partial failure."""
+    service = S3Service()
+
+    mock_s3_client = AsyncMock()
+    mock_s3_client.head_bucket.side_effect = Exception("Not found")
+    mock_s3_client.create_bucket.side_effect = [
+        None,
+        Exception("create failed"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
+    mock_context = MagicMock()
+    mock_context.__aenter__ = AsyncMock(return_value=mock_s3_client)
+    mock_context.__aexit__ = AsyncMock(return_value=None)
+    mock_session = MagicMock()
+    mock_session.client.return_value = mock_context
+
+    service._session = mock_session
+
+    with patch("app.services.s3_service.settings") as mock_settings:
+        mock_settings.S3_ENDPOINT_URL = "http://localstack:4566"
+        mock_settings.S3_ACCESS_KEY_ID = "test"
+        mock_settings.S3_SECRET_ACCESS_KEY = "test"
+        mock_settings.S3_REGION = "us-east-1"
+        mock_settings.S3_BUCKET_AVATARS = "avatars"
+        mock_settings.S3_BUCKET_PROJECT_LOGOS = "project-logos"
+        mock_settings.S3_BUCKET_TASK_LOGOS = "task-logos"
+        mock_settings.S3_BUCKET_TASK_ATTACHMENTS = "task-attachments"
+
+        await service._ensure_buckets()
+        assert service._buckets_initialized is False
+
+        await service._ensure_buckets()
+        assert service._buckets_initialized is True
+
+
 def test_infer_bucket():
     """Test bucket inference from file type."""
     with patch("app.services.s3_service.settings") as mock_settings:

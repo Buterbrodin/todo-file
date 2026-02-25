@@ -19,10 +19,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     Application lifespan handler.
 
-    Initializes S3 buckets and Kafka producer on startup,
+    Initializes DB engine, S3 buckets and Kafka producer on startup,
     cleans up resources on shutdown.
     """
     try:
+        db.ensure_engine()
         await kafka_service.start()
         await kafka_request_consumer.start()
         s3_service._ensure_session()

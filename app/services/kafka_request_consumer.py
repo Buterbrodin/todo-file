@@ -7,7 +7,7 @@ from io import BytesIO
 from typing import Any, Optional
 from uuid import uuid4
 
-from fastapi import HTTPException
+from fastapi import HTTPException, status
 from sqlalchemy import func, select
 
 from app.backend.db import get_db_session
@@ -479,8 +479,32 @@ class KafkaRequestConsumer:
             entity_type = payload.get("entity_type")
             entity_id = payload.get("entity_id")
             file_type = payload.get("file_type")
-            page = payload.get("page", 1)
-            page_size = payload.get("page_size", 20)
+            page_raw = payload.get("page", 1)
+            page_size_raw = payload.get("page_size", 20)
+
+            try:
+                page = int(page_raw)
+                page_size = int(page_size_raw)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Invalid pagination values: page and page_size must be "
+                        "integers"
+                    ),
+                ) from exc
+
+            if page < 1:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="page must be greater than or equal to 1",
+                )
+
+            if page_size < 1 or page_size > 100:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="page_size must be between 1 and 100",
+                )
 
             if entity_type:
                 validate_entity_type(entity_type)

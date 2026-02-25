@@ -517,6 +517,115 @@ async def test_handle_list_request_missing_request_id(
 
 
 @pytest.mark.asyncio
+async def test_handle_list_request_invalid_page(
+    kafka_consumer: KafkaRequestConsumer,
+    test_user: UserPrincipal,
+):
+    """Test list request with page < 1."""
+    payload = {
+        "request_id": "test-request-123",
+        "token": "valid-token",
+        "entity_type": "user",
+        "entity_id": 1,
+        "page": 0,
+        "page_size": 20,
+    }
+
+    with patch(
+        "app.services.kafka_request_consumer.decode_token", return_value=test_user
+    ):
+        with patch(
+            "app.services.kafka_request_consumer.check_list_files_access",
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "app.services.kafka_request_consumer.kafka_service._send",
+                new_callable=AsyncMock,
+            ) as mock_kafka_send:
+                await kafka_consumer._handle_list_request(payload)
+
+                response_payload = mock_kafka_send.call_args[0][1]
+                assert response_payload["status"] == "error"
+                assert (
+                    response_payload["detail"]
+                    == "page must be greater than or equal to 1"
+                )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("page_size", [0, 101])
+async def test_handle_list_request_invalid_page_size(
+    kafka_consumer: KafkaRequestConsumer,
+    test_user: UserPrincipal,
+    page_size: int,
+):
+    """Test list request with page_size outside [1, 100]."""
+    payload = {
+        "request_id": "test-request-123",
+        "token": "valid-token",
+        "entity_type": "user",
+        "entity_id": 1,
+        "page": 1,
+        "page_size": page_size,
+    }
+
+    with patch(
+        "app.services.kafka_request_consumer.decode_token", return_value=test_user
+    ):
+        with patch(
+            "app.services.kafka_request_consumer.check_list_files_access",
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "app.services.kafka_request_consumer.kafka_service._send",
+                new_callable=AsyncMock,
+            ) as mock_kafka_send:
+                await kafka_consumer._handle_list_request(payload)
+
+                response_payload = mock_kafka_send.call_args[0][1]
+                assert response_payload["status"] == "error"
+                assert (
+                    response_payload["detail"] == "page_size must be between 1 and 100"
+                )
+
+
+@pytest.mark.asyncio
+async def test_handle_list_request_non_integer_pagination(
+    kafka_consumer: KafkaRequestConsumer,
+    test_user: UserPrincipal,
+):
+    """Test list request with non-integer page/page_size."""
+    payload = {
+        "request_id": "test-request-123",
+        "token": "valid-token",
+        "entity_type": "user",
+        "entity_id": 1,
+        "page": "one",
+        "page_size": "twenty",
+    }
+
+    with patch(
+        "app.services.kafka_request_consumer.decode_token", return_value=test_user
+    ):
+        with patch(
+            "app.services.kafka_request_consumer.check_list_files_access",
+            new_callable=AsyncMock,
+        ):
+            with patch(
+                "app.services.kafka_request_consumer.kafka_service._send",
+                new_callable=AsyncMock,
+            ) as mock_kafka_send:
+                await kafka_consumer._handle_list_request(payload)
+
+                response_payload = mock_kafka_send.call_args[0][1]
+                assert response_payload["status"] == "error"
+                assert (
+                    response_payload["detail"]
+                    == "Invalid pagination values: page and page_size must be integers"
+                )
+
+
+@pytest.mark.asyncio
 async def test_send_upload_error(kafka_consumer: KafkaRequestConsumer):
     """Test sending upload error response."""
     request_id = "test-request-123"

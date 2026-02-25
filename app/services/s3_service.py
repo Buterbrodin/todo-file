@@ -51,6 +51,7 @@ class S3Service:
         ]
 
         try:
+            all_ready = True
             async with self._session.client("s3", **self._get_client_config()) as s3:
                 for bucket in buckets:
                     try:
@@ -61,11 +62,12 @@ class S3Service:
                             await s3.create_bucket(Bucket=bucket)
                             logger.info("Created bucket: %s", bucket)
                         except Exception as create_exc:
+                            all_ready = False
                             logger.warning(
                                 "Failed to create bucket %s: %s", bucket, create_exc
                             )
 
-            self._buckets_initialized = True
+            self._buckets_initialized = all_ready
         except Exception as exc:
             logger.error("Failed to ensure buckets: %s", exc)
 
