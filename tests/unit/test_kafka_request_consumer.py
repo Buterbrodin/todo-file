@@ -274,6 +274,84 @@ async def test_handle_upload_request_validation_error_detail(
 
 
 @pytest.mark.asyncio
+async def test_handle_upload_request_coerces_entity_and_user_ids(
+    kafka_consumer: KafkaRequestConsumer,
+    test_user: UserPrincipal,
+    valid_png_data: bytes,
+):
+    """Test upload request coercion for entity_id/user_id from Kafka payload."""
+    request_id = "test-request-123"
+    payload = {
+        "request_id": request_id,
+        "token": "valid-token",
+        "file_data": base64.b64encode(valid_png_data).decode("utf-8"),
+        "file_name": "test.png",
+        "content_type": "image/png",
+        "file_type": "avatar",
+        "entity_type": "user",
+        "entity_id": 1.0,
+        "user_id": "1",
+    }
+
+    meta = MagicMock()
+    meta.id = 1
+    meta.url = "http://test-s3/avatars/test.png"
+    meta.created_at = datetime.now(timezone.utc)
+
+    with patch(
+        "app.services.kafka_request_consumer.decode_token", return_value=test_user
+    ):
+        with patch(
+            "app.services.kafka_request_consumer.validate_entity_exists",
+            new_callable=AsyncMock,
+        ):
+            with patch.object(
+                kafka_consumer,
+                "_process_upload_file",
+                new_callable=AsyncMock,
+                return_value=meta,
+            ) as mock_process:
+                with patch(
+                    "app.services.kafka_request_consumer.kafka_service._send",
+                    new_callable=AsyncMock,
+                ):
+                    await kafka_consumer._handle_upload_request(payload)
+
+                    process_args = mock_process.call_args[0]
+                    assert process_args[6] == 1  # entity_id
+                    assert process_args[7] == 1  # user_id
+
+
+@pytest.mark.asyncio
+async def test_handle_upload_request_invalid_entity_id_type(
+    kafka_consumer: KafkaRequestConsumer,
+    test_user: UserPrincipal,
+):
+    """Test upload request rejects non-coercible entity_id."""
+    payload = {
+        "request_id": "test-request-123",
+        "token": "valid-token",
+        "file_data": base64.b64encode(b"test").decode("utf-8"),
+        "file_type": "avatar",
+        "entity_type": "user",
+        "entity_id": "not-an-int",
+    }
+
+    with patch(
+        "app.services.kafka_request_consumer.decode_token", return_value=test_user
+    ):
+        with patch(
+            "app.services.kafka_request_consumer.kafka_service._send",
+            new_callable=AsyncMock,
+        ) as mock_kafka_send:
+            await kafka_consumer._handle_upload_request(payload)
+
+            response_payload = mock_kafka_send.call_args[0][1]
+            assert response_payload["status"] == "error"
+            assert response_payload["detail"] == "entity_id must be an integer"
+
+
+@pytest.mark.asyncio
 async def test_handle_delete_request_success(
     kafka_consumer: KafkaRequestConsumer,
     test_user: UserPrincipal,

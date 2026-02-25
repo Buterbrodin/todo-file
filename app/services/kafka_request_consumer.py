@@ -156,6 +156,37 @@ class KafkaRequestConsumer:
             await self._send_upload_error(request_id, "Invalid authentication token")
             return None
 
+    def _coerce_int_field(self, value: Any, field_name: str) -> int:
+        """Coerce Kafka payload field to int with strict validation."""
+        if isinstance(value, bool):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{field_name} must be an integer",
+            )
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{field_name} must be an integer",
+                )
+            try:
+                return int(stripped)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{field_name} must be an integer",
+                ) from exc
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} must be an integer",
+        )
+
     async def _process_upload_file(
         self,
         request_id: str,
@@ -233,18 +264,26 @@ class KafkaRequestConsumer:
             content_type = payload.get("content_type", "application/octet-stream")
             file_type = payload.get("file_type")
             entity_type = payload.get("entity_type")
-            entity_id = payload.get("entity_id")
-            user_id = payload.get("user_id") or user.id
+            entity_id_raw = payload.get("entity_id")
+            user_id_raw = payload.get("user_id")
 
-            if not all([request_id, file_data_b64, file_type, entity_type, entity_id]):
+            if not all(
+                [request_id, file_data_b64, file_type, entity_type, entity_id_raw]
+            ):
                 logger.warning("Invalid upload request: missing required fields")
                 await self._send_upload_error(request_id, "Missing required fields")
                 return
 
+            entity_id = self._coerce_int_field(entity_id_raw, "entity_id")
+            user_id = (
+                self._coerce_int_field(user_id_raw, "user_id")
+                if user_id_raw is not None
+                else user.id
+            )
+
             # Type narrowing after validation
             assert file_type is not None
             assert entity_type is not None
-            assert entity_id is not None
             assert file_data_b64 is not None
 
             validate_file_type(file_type)
