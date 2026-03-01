@@ -16,7 +16,8 @@ from fastapi import (
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import UserPrincipal, get_current_user, get_db_session
+from app.backend.db import get_db
+from app.core.deps import UserPrincipal, get_current_user
 from app.core.exceptions import S3ServiceError
 from app.core.permissions import (
     check_file_permission,
@@ -75,7 +76,7 @@ async def upload_file(
     file_type: str = Form("task_attachment"),
     entity_type: str = Form("task"),
     entity_id: int = Form(...),
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     user: UserPrincipal = Depends(get_current_user),
     s3_service: S3Service = Depends(get_s3_service),
 ) -> FileMetadata:
@@ -161,7 +162,7 @@ async def upload_file(
 @router.get("/{file_id}", response_model=FileResponse)
 async def get_file(
     file_id: int,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     user: UserPrincipal = Depends(get_current_user),
 ) -> FileMetadata:
     """
@@ -198,7 +199,7 @@ async def list_files(
     file_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     user: UserPrincipal = Depends(get_current_user),
 ) -> FileListResponse:
     """
@@ -251,7 +252,7 @@ async def list_files(
 async def update_file(
     file_id: int,
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     user: UserPrincipal = Depends(get_current_user),
     s3_service: S3Service = Depends(get_s3_service),
 ) -> FileMetadata:
@@ -337,7 +338,7 @@ async def update_file(
 @router.delete("/{file_id}", status_code=status.HTTP_200_OK)
 async def delete_file(
     file_id: int,
-    db: AsyncSession = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db),
     user: UserPrincipal = Depends(get_current_user),
     s3_service: S3Service = Depends(get_s3_service),
 ) -> dict[str, str]:

@@ -11,8 +11,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.backend.db import Base
-from app.core.deps import get_current_user, get_db_session
+from app.backend.db import Base, get_db
+from app.core.deps import get_current_user
 from app.core.security import UserPrincipal
 from app.main import app
 from app.models.file import FileMetadata
@@ -140,10 +140,10 @@ async def test_db() -> AsyncGenerator[AsyncSessionAdapter, None]:
 async def client(test_db: AsyncSessionAdapter) -> AsyncGenerator[AsyncClient, None]:
     """Create test HTTP client with database override."""
 
-    async def override_get_db_session() -> AsyncSessionAdapter:
+    async def override_get_db() -> AsyncSessionAdapter:
         return test_db
 
-    app.dependency_overrides[get_db_session] = override_get_db_session
+    app.dependency_overrides[get_db] = override_get_db
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",

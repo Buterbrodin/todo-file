@@ -3,6 +3,7 @@ from typing import Literal, Optional
 
 from fastapi import HTTPException, status
 
+from app.core.deps import get_core_service_client
 from app.core.exceptions import CoreServiceError
 from app.core.security import UserPrincipal
 from app.models.file import EntityType, FileMetadata, FileType
@@ -15,6 +16,7 @@ async def check_file_permission(
     user: UserPrincipal,
     file_meta: FileMetadata,
     action: Literal["read", "write", "delete"] = "read",
+    core_client: Optional[CoreServiceClient] = None,
 ) -> None:
     """
     Assert that user has permission to perform action on file.
@@ -23,6 +25,8 @@ async def check_file_permission(
         user: Current authenticated user.
         file_meta: File metadata object.
         action: Action to perform (read, write, delete).
+        core_client: Optional core service client (for dependency injection).
+            If not provided, will be obtained via get_core_service_client().
 
     Raises:
         HTTPException: If permission denied.
@@ -45,7 +49,8 @@ async def check_file_permission(
 
     if file_meta.entity_type == EntityType.project:
         try:
-            core_client = CoreServiceClient()
+            if core_client is None:
+                core_client = get_core_service_client()
             has_access = await core_client.check_project_access(
                 user.id, file_meta.entity_id, action, user.email
             )
@@ -63,7 +68,8 @@ async def check_file_permission(
 
     if file_meta.entity_type == EntityType.task:
         try:
-            core_client = CoreServiceClient()
+            if core_client is None:
+                core_client = get_core_service_client()
             has_access = await core_client.check_task_access(
                 user.id, file_meta.entity_id, action, user.email
             )
@@ -89,6 +95,7 @@ async def check_list_files_access(
     user: UserPrincipal,
     entity_type: Optional[str],
     entity_id: Optional[int],
+    core_client: Optional[CoreServiceClient] = None,
 ) -> None:
     """
     Check if user has access to list files for the given entity.
@@ -97,6 +104,8 @@ async def check_list_files_access(
         user: Current authenticated user.
         entity_type: Type of entity.
         entity_id: ID of the entity.
+        core_client: Optional core service client (for dependency injection).
+            If not provided, will be obtained via get_core_service_client().
 
     Raises:
         HTTPException: If access is denied.
@@ -118,7 +127,9 @@ async def check_list_files_access(
             )
     elif entity_type == EntityType.project:
         try:
-            has_access = await CoreServiceClient().check_project_access(
+            if core_client is None:
+                core_client = get_core_service_client()
+            has_access = await core_client.check_project_access(
                 user.id, entity_id, "read", user.email
             )
         except CoreServiceError as exc:
@@ -133,7 +144,9 @@ async def check_list_files_access(
             )
     elif entity_type == EntityType.task:
         try:
-            has_access = await CoreServiceClient().check_task_access(
+            if core_client is None:
+                core_client = get_core_service_client()
+            has_access = await core_client.check_task_access(
                 user.id, entity_id, "read", user.email
             )
         except CoreServiceError as exc:
@@ -188,6 +201,7 @@ async def validate_entity_exists(
     entity_type: str,
     entity_id: int,
     user: UserPrincipal,
+    core_client: Optional[CoreServiceClient] = None,
 ) -> None:
     """
     Validate that entity exists and user has permission to upload files for it.
@@ -196,6 +210,8 @@ async def validate_entity_exists(
         entity_type: Type of entity (user, project, task).
         entity_id: ID of the entity.
         user: Current authenticated user.
+        core_client: Optional core service client (for dependency injection).
+            If not provided, will be obtained via get_core_service_client().
 
     Raises:
         HTTPException: If validation fails.
@@ -215,7 +231,8 @@ async def validate_entity_exists(
 
     if entity_type == EntityType.project:
         try:
-            core_client = CoreServiceClient()
+            if core_client is None:
+                core_client = get_core_service_client()
             has_access = await core_client.check_project_access(
                 user.id, entity_id, "write", user.email
             )
@@ -233,7 +250,8 @@ async def validate_entity_exists(
 
     if entity_type == EntityType.task:
         try:
-            core_client = CoreServiceClient()
+            if core_client is None:
+                core_client = get_core_service_client()
             has_access = await core_client.check_task_access(
                 user.id, entity_id, "write", user.email
             )

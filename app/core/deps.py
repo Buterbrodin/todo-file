@@ -1,8 +1,7 @@
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.db import get_db
 from app.core.security import UserPrincipal, decode_token
@@ -38,17 +37,8 @@ async def get_current_user(
     return decode_token(credentials.credentials)
 
 
-async def get_db_session(session: AsyncSession = Depends(get_db)) -> AsyncSession:
-    """
-    Get database session dependency.
-
-    Args:
-        session: Injected database session.
-
-    Returns:
-        AsyncSession instance.
-    """
-    return session
+# Re-export get_db for convenience
+get_db_session = get_db
 
 
 def get_core_service_client() -> CoreServiceClient:

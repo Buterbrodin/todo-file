@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend import db
-from app.core.deps import get_db_session
+from app.backend.db import get_db
 from app.routers import files
 from app.services.core_client import close_http_client
 from app.services.kafka_request_consumer import kafka_request_consumer
@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cleans up resources on shutdown.
     """
     try:
-        db.ensure_engine()
+        await db.ensure_engine_async()
         await kafka_service.start()
         await kafka_request_consumer.start()
         s3_service._ensure_session()
@@ -42,7 +42,7 @@ app.include_router(files.router)
 
 
 @app.get("/health", tags=["health"])
-async def health_check(db: AsyncSession = Depends(get_db_session)) -> dict[str, str]:
+async def health_check(db: AsyncSession = Depends(get_db)) -> dict[str, str]:
     """
     Health check endpoint.
 

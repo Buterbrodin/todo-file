@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 
@@ -18,6 +19,7 @@ class Base(DeclarativeBase):
 
 engine: Optional[AsyncEngine] = None
 AsyncSessionLocal: Optional[async_sessionmaker[AsyncSession]] = None
+_init_lock = asyncio.Lock()
 
 
 def ensure_engine() -> None:
@@ -25,6 +27,8 @@ def ensure_engine() -> None:
     Ensure database engine and session maker are initialized.
 
     Creates engine lazily to avoid driver import during test collection.
+    Note: This is a synchronous function for backward compatibility.
+    For async contexts, use ensure_engine_async() instead.
     """
     global engine, AsyncSessionLocal
     if engine is not None and AsyncSessionLocal is not None:
@@ -42,15 +46,43 @@ def ensure_engine() -> None:
     )
 
 
+async def ensure_engine_async() -> None:
+    """
+    Ensure database engine and session maker are initialized (async version).
+
+    Uses a lock to prevent race conditions during concurrent initialization.
+    This should be used in async contexts (e.g., lifespan handler).
+    """
+    global engine, AsyncSessionLocal
+    async with _init_lock:
+        if engine is not None and AsyncSessionLocal is not None:
+            return
+
+        engine = create_async_engine(
+            str(settings.DATABASE_URL),
+            echo=settings.DEBUG,
+            future=True,
+        )
+        AsyncSessionLocal = async_sessionmaker(
+            bind=engine,
+            expire_on_commit=False,
+            class_=AsyncSession,
+        )
+
+
 def get_engine() -> AsyncEngine:
     """
     Get the database engine.
 
     Returns:
         AsyncEngine instance.
+
+    Raises:
+        RuntimeError: If engine is not initialized.
     """
     ensure_engine()
-    assert engine is not None
+    if engine is None:
+        raise RuntimeError("Database engine not initialized")
     return engine
 
 
@@ -61,8 +93,9 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     Yields:
         AsyncSession for database operations.
     """
-    ensure_engine()
-    assert AsyncSessionLocal is not None
+    await ensure_engine_async()
+    if AsyncSessionLocal is None:
+        raise RuntimeError("Database session maker not initialized")
     async with AsyncSessionLocal() as session:
         yield session
 
@@ -78,7 +111,8 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     Yields:
         AsyncSession for database operations.
     """
-    ensure_engine()
-    assert AsyncSessionLocal is not None
+    await ensure_engine_async()
+    if AsyncSessionLocal is None:
+        raise RuntimeError("Database session maker not initialized")
     async with AsyncSessionLocal() as session:
         yield session
