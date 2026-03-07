@@ -7,13 +7,16 @@ Usage:
 """
 import asyncio
 import json
+import logging
 from datetime import datetime
 
 from aiokafka import AIOKafkaConsumer
 
+logger = logging.getLogger(__name__)
+
 
 async def consume_kafka_messages():
-    """Consume and print Kafka messages."""
+    """Consume and log Kafka messages."""
     consumer = AIOKafkaConsumer(
         "file.uploaded",
         "file.deleted",
@@ -25,17 +28,21 @@ async def consume_kafka_messages():
     )
 
     await consumer.start()
-    print("🎧 Listening for Kafka messages...")
-    print("=" * 80)
+    logger.info("Listening for Kafka messages...")
+    logger.info("=" * 80)
 
     try:
         async for message in consumer:
             timestamp = datetime.now().isoformat()
-            print(f"\n📨 [{timestamp}] Message received on topic: {message.topic}")
-            print(f"   Payload: {json.dumps(message.value, indent=2)}")
-            print("-" * 80)
+            logger.info(
+                "\n[%s] Message received on topic: %s",
+                timestamp,
+                message.topic,
+            )
+            logger.info("   Payload: %s", json.dumps(message.value, indent=2))
+            logger.info("-" * 80)
     except KeyboardInterrupt:
-        print("\n\n✅ Consumer stopped")
+        logger.info("\n\nConsumer stopped")
     finally:
         await consumer.stop()
 

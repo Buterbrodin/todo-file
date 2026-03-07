@@ -32,7 +32,8 @@ class AsyncSessionAdapter:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def add(self, instance) -> None:
+    async def add(self, instance) -> None:
+        """Add instance to session asynchronously."""
         self._session.add(instance)
 
     async def execute(self, *args, **kwargs):
@@ -137,7 +138,9 @@ async def test_db() -> AsyncGenerator[AsyncSessionAdapter, None]:
 
 
 @pytest.fixture
-async def client(test_db: AsyncSessionAdapter) -> AsyncGenerator[AsyncClient, None]:
+async def client(
+    test_db: AsyncSessionAdapter,
+) -> AsyncGenerator[AsyncClient, None]:
     """Create test HTTP client with database override."""
 
     async def override_get_db() -> AsyncSessionAdapter:
@@ -232,7 +235,7 @@ async def test_file_metadata(test_db: AsyncSessionAdapter) -> FileMetadata:
         created_at=now,
         updated_at=now,
     )
-    test_db.add(file_meta)
+    await test_db.add(file_meta)
     await test_db.commit()
     await test_db.refresh(file_meta)
     return file_meta

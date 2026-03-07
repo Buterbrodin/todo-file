@@ -372,7 +372,7 @@ async def test_handle_delete_request_success(
         url="http://test-s3/avatars/test.jpg",
         created_at=datetime.now(timezone.utc),
     )
-    test_db.add(file_meta)
+    await test_db.add(file_meta)
     await test_db.commit()
     await test_db.refresh(file_meta)
 
@@ -494,7 +494,7 @@ async def test_handle_list_request_success(
         url="http://test-s3/avatars/test.jpg",
         created_at=datetime.now(timezone.utc),
     )
-    test_db.add(file_meta)
+    await test_db.add(file_meta)
     await test_db.commit()
 
     request_id = "test-request-123"

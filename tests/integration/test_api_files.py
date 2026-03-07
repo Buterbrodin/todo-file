@@ -302,7 +302,7 @@ async def test_admin_can_access_other_user_file(admin_client, test_db):
         created_at=now,
         updated_at=now,
     )
-    test_db.add(file_meta)
+    await test_db.add(file_meta)
     await test_db.commit()
     await test_db.refresh(file_meta)
 
@@ -330,7 +330,7 @@ async def test_admin_can_delete_other_user_file(admin_client, test_db):
         created_at=now,
         updated_at=now,
     )
-    test_db.add(file_meta)
+    await test_db.add(file_meta)
     await test_db.commit()
     await test_db.refresh(file_meta)
 
