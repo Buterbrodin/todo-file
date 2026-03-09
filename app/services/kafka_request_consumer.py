@@ -4,13 +4,14 @@ import json
 import logging
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
 
 from app.backend.db import get_db_session
+from app.core.constants import FileAction
 from app.core.exceptions import S3ServiceError
 from app.core.permissions import (
     check_file_permission,
@@ -24,6 +25,7 @@ from app.core.permissions import (
 )
 from app.core.security import UserPrincipal, decode_token
 from app.models.file import FileMetadata
+from app.services.core_client import CoreServiceClient
 from app.services.kafka_service import kafka_service
 from app.services.s3_service import infer_bucket, s3_service
 from app.settings import settings
@@ -40,6 +42,7 @@ class KafkaRequestConsumer:
         self._consumer_cls: Optional[type] = None
         self._running = False
         self._consume_task: Optional[asyncio.Task] = None
+        self._core_client: Optional[CoreServiceClient] = None
 
     def _load_consumer_cls(self) -> None:
         """Load AIOKafkaConsumer class if available."""
@@ -55,12 +58,30 @@ class KafkaRequestConsumer:
 
     async def start(self) -> None:
         """Start the Kafka consumer."""
-        if self._running or not settings.KAFKA_BOOTSTRAP_SERVERS:
+        if self._running:
+            logger.debug("Kafka consumer already running")
+            return
+
+        if not settings.KAFKA_BOOTSTRAP_SERVERS:
+            logger.warning(
+                "KAFKA_BOOTSTRAP_SERVERS not configured, Kafka consumer disabled"
+            )
             return
 
         self._load_consumer_cls()
         if not self._consumer_cls:
+            logger.warning("aiokafka not available, Kafka consumer disabled")
             return
+
+        # Initialize core service client for dependency injection
+        try:
+            self._core_client = CoreServiceClient()
+        except Exception as exc:
+            logger.warning(
+                "Failed to initialize core service client: %s. "
+                "Permission checks will use fallback initialization.",
+                exc,
+            )
 
         try:
             topics = [
@@ -68,6 +89,11 @@ class KafkaRequestConsumer:
                 settings.KAFKA_TOPIC_FILE_DELETE_REQUEST,
                 settings.KAFKA_TOPIC_FILE_LIST_REQUEST,
             ]
+            logger.info(
+                "Starting Kafka consumer: bootstrap_servers=%s, topics=%s",
+                settings.KAFKA_BOOTSTRAP_SERVERS,
+                topics,
+            )
             self._consumer = self._consumer_cls(
                 *topics,
                 bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS,
@@ -79,9 +105,14 @@ class KafkaRequestConsumer:
             await self._consumer.start()
             self._running = True
             self._consume_task = asyncio.create_task(self._consume_loop())
-            logger.info("Kafka request consumer started")
+            logger.info(
+                "Kafka request consumer started successfully: topics=%s",
+                topics,
+            )
         except Exception as exc:
-            logger.error("Failed to start Kafka request consumer: %s", exc)
+            logger.error(
+                "Failed to start Kafka request consumer: %s", exc, exc_info=True
+            )
 
     async def stop(self) -> None:
         """Stop the Kafka consumer gracefully."""
@@ -131,6 +162,9 @@ class KafkaRequestConsumer:
             topic: Kafka topic name.
             payload: Message payload.
         """
+        logger.info(
+            "Received Kafka message: topic=%s, event=%s", topic, payload.get("event")
+        )
         if topic == settings.KAFKA_TOPIC_FILE_UPLOAD_REQUEST:
             await self._handle_upload_request(payload)
         elif topic == settings.KAFKA_TOPIC_FILE_DELETE_REQUEST:
@@ -138,22 +172,33 @@ class KafkaRequestConsumer:
         elif topic == settings.KAFKA_TOPIC_FILE_LIST_REQUEST:
             await self._handle_list_request(payload)
 
-    async def _validate_upload_token(
-        self, token: Optional[str], request_id: Optional[str]
+    async def _validate_token(
+        self,
+        token: Optional[str],
+        request_id: Optional[str],
+        error_callback: Callable[[Optional[str], str], Any],
     ) -> Optional[UserPrincipal]:
-        """Validate upload request token."""
+        """
+        Validate request token.
+
+        Args:
+            token: JWT token string.
+            request_id: Request ID for error reporting.
+            error_callback: Async function to call on error: (request_id, message).
+
+        Returns:
+            UserPrincipal if token is valid, None otherwise.
+        """
         if not token:
-            logger.warning(
-                "Invalid upload request: missing token, request_id=%s", request_id
-            )
-            await self._send_upload_error(request_id, "Missing authentication token")
+            logger.warning("Invalid request: missing token, request_id=%s", request_id)
+            await error_callback(request_id, "Missing authentication token")
             return None
 
         try:
             return decode_token(token)
         except Exception as exc:
-            logger.warning("Invalid token in upload request: %s", exc)
-            await self._send_upload_error(request_id, "Invalid authentication token")
+            logger.warning("Invalid token in request: %s", exc)
+            await error_callback(request_id, "Invalid authentication token")
             return None
 
     def _coerce_int_field(self, value: Any, field_name: str) -> int:
@@ -254,9 +299,18 @@ class KafkaRequestConsumer:
             payload: Request payload with file data and metadata.
         """
         request_id = payload.get("request_id")
+        logger.info("Processing upload request: request_id=%s", request_id)
         try:
-            user = await self._validate_upload_token(payload.get("token"), request_id)
+            user = await self._validate_token(
+                payload.get("token"),
+                request_id,
+                self._send_upload_error,
+            )
             if not user:
+                logger.warning(
+                    "Token validation failed for upload request: request_id=%s",
+                    request_id,
+                )
                 return
 
             file_data_b64 = payload.get("file_data")
@@ -290,10 +344,35 @@ class KafkaRequestConsumer:
             validate_entity_type(entity_type)
 
             try:
-                await validate_entity_exists(entity_type, entity_id, user)
+                await validate_entity_exists(
+                    entity_type, entity_id, user, core_client=self._core_client
+                )
+            except HTTPException as exc:
+                error_detail = str(exc.detail)
+                logger.warning(
+                    "Entity validation failed: request_id=%s, "
+                    "entity_type=%s, entity_id=%s, status=%s, error=%s",
+                    request_id,
+                    entity_type,
+                    entity_id,
+                    exc.status_code,
+                    error_detail,
+                )
+                await self._send_upload_error(request_id, error_detail)
+                return
             except Exception as exc:
-                logger.warning("Entity validation failed: %s", exc)
-                await self._send_upload_error(request_id, "Access denied")
+                logger.error(
+                    "Unexpected error during entity validation: "
+                    "request_id=%s, entity_type=%s, entity_id=%s, error=%s",
+                    request_id,
+                    entity_type,
+                    entity_id,
+                    exc,
+                    exc_info=True,
+                )
+                await self._send_upload_error(
+                    request_id, "Internal error during validation"
+                )
                 return
 
             validate_content_type(content_type, settings.ALLOWED_IMAGE_TYPES)
@@ -312,7 +391,17 @@ class KafkaRequestConsumer:
                 user_id,
             )
             if not meta:
+                logger.warning(
+                    "File upload processing failed: request_id=%s", request_id
+                )
                 return
+
+            logger.info(
+                "File uploaded successfully: request_id=%s, file_id=%s, url=%s",
+                request_id,
+                meta.id,
+                meta.url,
+            )
 
             await kafka_service.send_file_uploaded(
                 {
@@ -372,13 +461,10 @@ class KafkaRequestConsumer:
                 )
                 return
 
-            try:
-                user = decode_token(token)
-            except Exception as exc:
-                logger.warning("Invalid token in delete request: %s", exc)
-                await self._send_delete_error(
-                    request_id, "Invalid authentication token"
-                )
+            user = await self._validate_token(
+                token, request_id, self._send_delete_error
+            )
+            if not user:
                 return
 
             file_id_raw = payload.get("file_id")
@@ -406,7 +492,17 @@ class KafkaRequestConsumer:
                     return
 
                 try:
-                    await check_file_permission(user, meta, "delete")
+                    await check_file_permission(
+                        user, meta, FileAction.DELETE, core_client=self._core_client
+                    )
+                except HTTPException as exc:
+                    logger.warning(
+                        "Permission denied for file deletion: request_id=%s, detail=%s",
+                        request_id,
+                        exc.detail,
+                    )
+                    await self._send_delete_error(request_id, str(exc.detail))
+                    return
                 except Exception as exc:
                     logger.warning("Permission denied for file deletion: %s", exc)
                     await self._send_delete_error(request_id, "Permission denied")
@@ -458,22 +554,6 @@ class KafkaRequestConsumer:
             logger.error("Error processing delete request: %s", exc, exc_info=True)
             await self._send_delete_error(request_id, "Internal error during deletion")
 
-    async def _validate_list_token(
-        self, token: Optional[str], request_id: Optional[str]
-    ) -> Optional[UserPrincipal]:
-        """Validate list request token."""
-        if not token:
-            logger.warning("Invalid list request: missing token")
-            await self._send_list_error(request_id, "Missing authentication token")
-            return None
-
-        try:
-            return decode_token(token)
-        except Exception as exc:
-            logger.warning("Invalid token in list request: %s", exc)
-            await self._send_list_error(request_id, "Invalid authentication token")
-            return None
-
     async def _build_list_query(
         self,
         db: Any,
@@ -511,7 +591,9 @@ class KafkaRequestConsumer:
                 await self._send_list_error(request_id, "Missing request_id")
                 return
 
-            user = await self._validate_list_token(payload.get("token"), request_id)
+            user = await self._validate_token(
+                payload.get("token"), request_id, self._send_list_error
+            )
             if not user:
                 return
 
@@ -550,7 +632,9 @@ class KafkaRequestConsumer:
             if file_type:
                 validate_file_type(file_type)
 
-            await check_list_files_access(user, entity_type, entity_id)
+            await check_list_files_access(
+                user, entity_type, entity_id, core_client=self._core_client
+            )
 
             async with get_db_session() as db:
                 query, total = await self._build_list_query(
@@ -622,21 +706,35 @@ class KafkaRequestConsumer:
         user_id: int,
     ) -> None:
         """Send upload success response to Kafka."""
-        await kafka_service._send(
+        response_payload = {
+            "event": "file.upload.response",
+            "status": "ok",
+            "request_id": request_id,
+            "file_id": file_id,
+            "file_type": file_type,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "url": url,
+            "timestamp": timestamp,
+            "user_id": user_id,
+        }
+        logger.debug(
+            "Sending upload success response: request_id=%s, topic=%s",
+            request_id,
             settings.KAFKA_TOPIC_FILE_UPLOAD_RESPONSE,
-            {
-                "event": "file.upload.response",
-                "status": "ok",
-                "request_id": request_id,
-                "file_id": file_id,
-                "file_type": file_type,
-                "entity_type": entity_type,
-                "entity_id": entity_id,
-                "url": url,
-                "timestamp": timestamp,
-                "user_id": user_id,
-            },
         )
+        success = await kafka_service._send(
+            settings.KAFKA_TOPIC_FILE_UPLOAD_RESPONSE,
+            response_payload,
+        )
+        if success:
+            logger.info(
+                "Upload success response sent successfully: request_id=%s", request_id
+            )
+        else:
+            logger.error(
+                "Failed to send upload success response: request_id=%s", request_id
+            )
 
     async def _send_upload_error(self, request_id: Optional[str], detail: str) -> None:
         """Send upload error response to Kafka."""

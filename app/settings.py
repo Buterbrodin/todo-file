@@ -60,7 +60,6 @@ class Settings(BaseSettings):
     JWT_ALG: str = "HS256"
 
     AUTH_SERVICE_BASE_URL: Optional[HttpUrl] = None
-    INTERNAL_API_TOKEN: Optional[str] = None
     AUTH_USER_EXISTS_PATH: str = "/internal/users/exists"
 
     CORE_SERVICE_BASE_URL: Optional[HttpUrl] = None

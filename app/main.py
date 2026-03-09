@@ -1,3 +1,5 @@
+import logging
+import sys
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -13,6 +15,15 @@ from app.services.kafka_request_consumer import kafka_request_consumer
 from app.services.kafka_service import kafka_service
 from app.services.s3_service import s3_service
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -23,18 +34,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cleans up resources on shutdown.
     """
     try:
+        logger.info("Initializing database...")
         await db.ensure_engine_async()
+        logger.info("Starting Kafka services...")
         await kafka_service.start()
         await kafka_request_consumer.start()
+        logger.info("Initializing S3 service...")
         s3_service._ensure_session()
         await s3_service._ensure_buckets()
+        logger.info("Application startup complete")
         yield
     finally:
+        logger.info("Shutting down application...")
         await kafka_request_consumer.stop()
         await kafka_service.stop()
         await close_http_client()
         if db.engine:
             await db.engine.dispose()
+        logger.info("Application shutdown complete")
 
 
 app = FastAPI(title="todo-files", lifespan=lifespan)

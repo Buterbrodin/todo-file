@@ -1,10 +1,12 @@
 import logging
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 from fastapi import HTTPException, status
 
+from app.core.constants import FileAction
 from app.core.deps import get_core_service_client
 from app.core.exceptions import CoreServiceError
+from app.core.permission_utils import is_global_admin
 from app.core.security import UserPrincipal
 from app.models.file import EntityType, FileMetadata, FileType
 from app.services.core_client import CoreServiceClient
@@ -15,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def check_file_permission(
     user: UserPrincipal,
     file_meta: FileMetadata,
-    action: Literal["read", "write", "delete"] = "read",
+    action: Union[Literal["read", "write", "delete"], FileAction] = FileAction.READ,
     core_client: Optional[CoreServiceClient] = None,
 ) -> None:
     """
@@ -31,13 +33,16 @@ async def check_file_permission(
     Raises:
         HTTPException: If permission denied.
     """
-    if user.is_admin:
+    # Normalize action to string for comparison
+    action_str = action.value if isinstance(action, FileAction) else action
+
+    if is_global_admin(user):
         return
 
     if file_meta.entity_type == EntityType.user:
         if file_meta.entity_id == user.id:
             return
-        if action != "read":
+        if action_str != "read":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only manage your own avatar",
@@ -52,7 +57,7 @@ async def check_file_permission(
             if core_client is None:
                 core_client = get_core_service_client()
             has_access = await core_client.check_project_access(
-                user.id, file_meta.entity_id, action, user.email
+                user.id, file_meta.entity_id, action_str, user.email
             )
             if not has_access:
                 raise HTTPException(
@@ -71,7 +76,7 @@ async def check_file_permission(
             if core_client is None:
                 core_client = get_core_service_client()
             has_access = await core_client.check_task_access(
-                user.id, file_meta.entity_id, action, user.email
+                user.id, file_meta.entity_id, action_str, user.email
             )
             if not has_access:
                 raise HTTPException(
@@ -110,7 +115,7 @@ async def check_list_files_access(
     Raises:
         HTTPException: If access is denied.
     """
-    if user.is_admin:
+    if is_global_admin(user):
         return
 
     if not entity_type or entity_id is None:
@@ -130,7 +135,7 @@ async def check_list_files_access(
             if core_client is None:
                 core_client = get_core_service_client()
             has_access = await core_client.check_project_access(
-                user.id, entity_id, "read", user.email
+                user.id, entity_id, FileAction.READ, user.email
             )
         except CoreServiceError as exc:
             raise HTTPException(
@@ -147,7 +152,7 @@ async def check_list_files_access(
             if core_client is None:
                 core_client = get_core_service_client()
             has_access = await core_client.check_task_access(
-                user.id, entity_id, "read", user.email
+                user.id, entity_id, FileAction.READ, user.email
             )
         except CoreServiceError as exc:
             raise HTTPException(
@@ -222,8 +227,12 @@ async def validate_entity_exists(
             detail="Invalid entity_id",
         )
 
+    # Global admin has access to all entities
+    if is_global_admin(user):
+        return
+
     if entity_type == EntityType.user:
-        if entity_id != user.id and not user.is_admin:
+        if entity_id != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only upload files for yourself",
@@ -233,10 +242,27 @@ async def validate_entity_exists(
         try:
             if core_client is None:
                 core_client = get_core_service_client()
+            logger.debug(
+                "Checking project access: user_id=%s, project_id=%s, email=%s",
+                user.id,
+                entity_id,
+                user.email,
+            )
             has_access = await core_client.check_project_access(
-                user.id, entity_id, "write", user.email
+                user.id, entity_id, FileAction.WRITE, user.email
+            )
+            logger.debug(
+                "Project access check result: user_id=%s, project_id=%s, has_access=%s",
+                user.id,
+                entity_id,
+                has_access,
             )
             if not has_access:
+                logger.warning(
+                    "Access denied to project: user_id=%s, project_id=%s",
+                    user.id,
+                    entity_id,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access denied to project",
@@ -252,15 +278,33 @@ async def validate_entity_exists(
         try:
             if core_client is None:
                 core_client = get_core_service_client()
+            logger.debug(
+                "Checking task access: user_id=%s, task_id=%s, email=%s",
+                user.id,
+                entity_id,
+                user.email,
+            )
             has_access = await core_client.check_task_access(
-                user.id, entity_id, "write", user.email
+                user.id, entity_id, FileAction.WRITE, user.email
+            )
+            logger.debug(
+                "Task access check result: user_id=%s, task_id=%s, has_access=%s",
+                user.id,
+                entity_id,
+                has_access,
             )
             if not has_access:
+                logger.warning(
+                    "Access denied to task: user_id=%s, task_id=%s",
+                    user.id,
+                    entity_id,
+                )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access denied to task",
                 )
         except CoreServiceError as exc:
+            logger.warning("Core service task access check failed: %s", exc)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Core service unavailable",

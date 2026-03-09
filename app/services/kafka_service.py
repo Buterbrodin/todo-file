@@ -33,22 +33,34 @@ class KafkaService:
 
     async def start(self) -> None:
         """Start the Kafka producer."""
-        if self._started or not settings.KAFKA_BOOTSTRAP_SERVERS:
+        if self._started:
+            logger.debug("Kafka producer already started")
+            return
+
+        if not settings.KAFKA_BOOTSTRAP_SERVERS:
+            logger.warning(
+                "KAFKA_BOOTSTRAP_SERVERS not configured, Kafka producer disabled"
+            )
             return
 
         self._load_producer_cls()
         if not self._producer_cls:
+            logger.warning("aiokafka not available, Kafka producer disabled")
             return
 
         try:
+            logger.info(
+                "Starting Kafka producer: bootstrap_servers=%s",
+                settings.KAFKA_BOOTSTRAP_SERVERS,
+            )
             self._producer = self._producer_cls(
                 bootstrap_servers=settings.KAFKA_BOOTSTRAP_SERVERS
             )
             await self._producer.start()
             self._started = True
-            logger.info("Kafka producer started")
+            logger.info("Kafka producer started successfully")
         except Exception as exc:
-            logger.error("Failed to start Kafka producer: %s", exc)
+            logger.error("Failed to start Kafka producer: %s", exc, exc_info=True)
             self._producer = None
 
     async def stop(self) -> None:

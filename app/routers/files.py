@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.db import get_db
+from app.core.constants import FileAction
 from app.core.deps import UserPrincipal, get_current_user
 from app.core.exceptions import S3ServiceError
 from app.core.permissions import (
@@ -188,7 +189,7 @@ async def get_file(
             detail="File not found",
         )
 
-    await check_file_permission(user, meta, "read")
+    await check_file_permission(user, meta, FileAction.READ)
     return meta
 
 
@@ -281,7 +282,7 @@ async def update_file(
             detail="File not found",
         )
 
-    await check_file_permission(user, meta, "write")
+    await check_file_permission(user, meta, FileAction.WRITE)
 
     if file.content_type and file.content_type not in settings.ALLOWED_IMAGE_TYPES:
         allowed = ", ".join(settings.ALLOWED_IMAGE_TYPES)
@@ -366,7 +367,7 @@ async def delete_file(
             detail="File not found",
         )
 
-    await check_file_permission(user, meta, "delete")
+    await check_file_permission(user, meta, FileAction.DELETE)
 
     try:
         await s3_service.delete_file(bucket=meta.bucket_name, key=meta.file_key)
