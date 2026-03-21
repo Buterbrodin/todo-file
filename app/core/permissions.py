@@ -1,5 +1,5 @@
 import logging
-from typing import Literal, Optional, Union
+from typing import Optional
 
 from fastapi import HTTPException, status
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def check_file_permission(
     user: UserPrincipal,
     file_meta: FileMetadata,
-    action: Union[Literal["read", "write", "delete"], FileAction] = FileAction.READ,
+    action: FileAction = FileAction.READ,
     core_client: Optional[CoreServiceClient] = None,
 ) -> None:
     """
@@ -26,23 +26,20 @@ async def check_file_permission(
     Args:
         user: Current authenticated user.
         file_meta: File metadata object.
-        action: Action to perform (read, write, delete).
+        action: Action to perform.
         core_client: Optional core service client (for dependency injection).
             If not provided, will be obtained via get_core_service_client().
 
     Raises:
         HTTPException: If permission denied.
     """
-    # Normalize action to string for comparison
-    action_str = action.value if isinstance(action, FileAction) else action
-
     if is_global_admin(user):
         return
 
     if file_meta.entity_type == EntityType.user:
         if file_meta.entity_id == user.id:
             return
-        if action_str != "read":
+        if action != FileAction.READ:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only manage your own avatar",
@@ -57,7 +54,7 @@ async def check_file_permission(
             if core_client is None:
                 core_client = get_core_service_client()
             has_access = await core_client.check_project_access(
-                user.id, file_meta.entity_id, action_str, user.email
+                user.id, file_meta.entity_id, action, user.email
             )
             if not has_access:
                 raise HTTPException(
@@ -76,7 +73,7 @@ async def check_file_permission(
             if core_client is None:
                 core_client = get_core_service_client()
             has_access = await core_client.check_task_access(
-                user.id, file_meta.entity_id, action_str, user.email
+                user.id, file_meta.entity_id, action, user.email
             )
             if not has_access:
                 raise HTTPException(

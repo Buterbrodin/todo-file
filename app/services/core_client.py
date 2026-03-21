@@ -1,7 +1,8 @@
 import logging
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import httpx
+from starlette import status
 
 from app.core.constants import FileAction
 from app.core.exceptions import CoreServiceError
@@ -44,13 +45,12 @@ class CoreServiceClient:
         self,
         user_id: int,
         project_id: int,
-        action: Union[str, FileAction] = FileAction.READ,
+        action: FileAction = FileAction.READ,
         email: str | None = None,
     ) -> bool:
         url = self._build_url(f"internal/projects/{project_id}/check-access")
         headers = {"X-Internal-Token": str(settings.CORE_INTERNAL_TOKEN)}
-        action_str = action.value if isinstance(action, FileAction) else action
-        payload: dict[str, Any] = {"user_id": user_id, "action": action_str}
+        payload: dict[str, Any] = {"user_id": user_id, "action": action.value}
         if email:
             payload["email"] = email
 
@@ -76,7 +76,7 @@ class CoreServiceClient:
             )
             return has_access
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+            if exc.response.status_code == status.HTTP_404_NOT_FOUND:
                 logger.debug("Project not found: project_id=%s", project_id)
                 return False
             logger.error(
@@ -97,13 +97,12 @@ class CoreServiceClient:
         self,
         user_id: int,
         task_id: int,
-        action: Union[str, FileAction] = FileAction.READ,
+        action: FileAction = FileAction.READ,
         email: str | None = None,
     ) -> bool:
         url = self._build_url(f"internal/tasks/{task_id}/check-access")
         headers = {"X-Internal-Token": str(settings.CORE_INTERNAL_TOKEN)}
-        action_str = action.value if isinstance(action, FileAction) else action
-        payload: dict[str, Any] = {"user_id": user_id, "action": action_str}
+        payload: dict[str, Any] = {"user_id": user_id, "action": action.value}
         if email:
             payload["email"] = email
 
@@ -114,7 +113,7 @@ class CoreServiceClient:
             data: dict[str, Any] = response.json()
             return data.get("has_access", False)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+            if exc.response.status_code == status.HTTP_404_NOT_FOUND:
                 return False
             logger.error(
                 "Core service error checking task access: %s", exc.response.status_code
