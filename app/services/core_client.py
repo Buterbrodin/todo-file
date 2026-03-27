@@ -2,7 +2,9 @@ import logging
 from typing import Any, Optional
 
 import httpx
+from starlette import status
 
+from app.core.constants import FileAction
 from app.core.exceptions import CoreServiceError
 from app.settings import settings
 
@@ -43,45 +45,64 @@ class CoreServiceClient:
         self,
         user_id: int,
         project_id: int,
-        action: str = "read",
+        action: FileAction = FileAction.READ,
         email: str | None = None,
     ) -> bool:
         url = self._build_url(f"internal/projects/{project_id}/check-access")
         headers = {"X-Internal-Token": str(settings.CORE_INTERNAL_TOKEN)}
-        payload: dict[str, Any] = {"user_id": user_id, "action": action}
+        payload: dict[str, Any] = {"user_id": user_id, "action": action.value}
         if email:
             payload["email"] = email
+
+        logger.debug(
+            "Checking project access: url=%s, user_id=%s, project_id=%s, action=%s",
+            url,
+            user_id,
+            project_id,
+            action,
+        )
 
         try:
             client = await get_http_client()
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             data: dict[str, Any] = response.json()
-            return data.get("has_access", False)
+            has_access = data.get("has_access", False)
+            logger.debug(
+                "Project access check result: project_id=%s, user_id=%s, has_access=%s",
+                project_id,
+                user_id,
+                has_access,
+            )
+            return has_access
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+            if exc.response.status_code == status.HTTP_404_NOT_FOUND:
+                logger.debug("Project not found: project_id=%s", project_id)
                 return False
             logger.error(
-                "Core service error checking project access: %s",
+                "Core service error checking project access: "
+                "status=%s, url=%s, response=%s",
                 exc.response.status_code,
+                url,
+                exc.response.text,
             )
             raise CoreServiceError(
                 f"Core service error: {exc.response.status_code}"
             ) from exc
         except httpx.RequestError as exc:
-            logger.error("Core service unreachable: %s", exc)
+            logger.error("Core service unreachable: url=%s, error=%s", url, exc)
             raise CoreServiceError("Core service unreachable") from exc
 
     async def check_task_access(
         self,
         user_id: int,
         task_id: int,
-        action: str = "read",
+        action: FileAction = FileAction.READ,
         email: str | None = None,
     ) -> bool:
         url = self._build_url(f"internal/tasks/{task_id}/check-access")
         headers = {"X-Internal-Token": str(settings.CORE_INTERNAL_TOKEN)}
-        payload: dict[str, Any] = {"user_id": user_id, "action": action}
+        payload: dict[str, Any] = {"user_id": user_id, "action": action.value}
         if email:
             payload["email"] = email
 
@@ -92,7 +113,7 @@ class CoreServiceClient:
             data: dict[str, Any] = response.json()
             return data.get("has_access", False)
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == 404:
+            if exc.response.status_code == status.HTTP_404_NOT_FOUND:
                 return False
             logger.error(
                 "Core service error checking task access: %s", exc.response.status_code
