@@ -143,10 +143,10 @@ async def test_handle_upload_request_success(
                 side_effect=mock_get_db_session,
             ):
                 with patch(
-                "app.services.kafka_request_consumer.s3_service.upload_file",
-                new_callable=AsyncMock,
-                return_value="http://test-s3/avatars/test.png",
-            ) as mock_upload:
+                    "app.services.kafka_request_consumer.s3_service.upload_file",
+                    new_callable=AsyncMock,
+                    return_value="http://test-s3/avatars/test.png",
+                ) as mock_upload:
                     with patch(
                         "app.services.kafka_request_consumer.kafka_service._send",
                         new_callable=AsyncMock,
@@ -162,11 +162,7 @@ async def test_handle_upload_request_success(
                             (c for c in call_args if "file.uploaded" in str(c)), None
                         )
                         response_call = next(
-                            (
-                                c
-                                for c in call_args
-                                if "file.upload.response" in str(c)
-                            ),
+                            (c for c in call_args if "file.upload.response" in str(c)),
                             None,
                         )
                         assert uploaded_call is not None
