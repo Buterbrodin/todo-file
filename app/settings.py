@@ -45,7 +45,7 @@ class Settings(BaseSettings):
         default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]
     )
 
-    KAFKA_BOOTSTRAP_SERVERS: Optional[str] = None
+    KAFKA_BOOTSTRAP_SERVERS: Optional[str] = "localhost:9092"
     KAFKA_TOPIC_FILE_UPLOADED: str = "file.uploaded"
     KAFKA_TOPIC_FILE_DELETED: str = "file.deleted"
     KAFKA_TOPIC_FILE_UPDATED: str = "file.updated"
@@ -66,8 +66,8 @@ class Settings(BaseSettings):
     AUTH_SERVICE_BASE_URL: Optional[HttpUrl] = None
     AUTH_USER_EXISTS_PATH: str = "/internal/users/exists"
 
-    CORE_SERVICE_BASE_URL: Optional[HttpUrl] = None
-    CORE_INTERNAL_TOKEN: Optional[str] = None
+    CORE_SERVICE_BASE_URL: Optional[HttpUrl] = HttpUrl("http://localhost:8000")
+    CORE_INTERNAL_TOKEN: Optional[str] = "change_me_internal_token"
 
     FILE_BASE_URL: str = "http://localhost:8002"
 
