@@ -113,6 +113,24 @@ async def test_handle_upload_request_success(
         "user_id": 1,
     }
 
+    class MockUploadDbSession:
+        """Minimal DB session mock for upload flow."""
+
+        def add(self, instance) -> None:
+            if getattr(instance, "id", None) is None:
+                instance.id = 1
+
+        async def commit(self) -> None:
+            return None
+
+        async def refresh(self, instance) -> None:
+            if getattr(instance, "created_at", None) is None:
+                instance.created_at = datetime.now(timezone.utc)
+
+    @asynccontextmanager
+    async def mock_get_db_session():
+        yield MockUploadDbSession()
+
     with patch(
         "app.services.kafka_request_consumer.decode_token", return_value=test_user
     ):
@@ -121,31 +139,40 @@ async def test_handle_upload_request_success(
             new_callable=AsyncMock,
         ) as mock_validate:
             with patch(
+                "app.services.kafka_request_consumer.get_db_session",
+                side_effect=mock_get_db_session,
+            ):
+                with patch(
                 "app.services.kafka_request_consumer.s3_service.upload_file",
                 new_callable=AsyncMock,
                 return_value="http://test-s3/avatars/test.png",
             ) as mock_upload:
-                with patch(
-                    "app.services.kafka_request_consumer.kafka_service._send",
-                    new_callable=AsyncMock,
-                ) as mock_kafka_send:
-                    await kafka_consumer._handle_upload_request(payload)
+                    with patch(
+                        "app.services.kafka_request_consumer.kafka_service._send",
+                        new_callable=AsyncMock,
+                    ) as mock_kafka_send:
+                        await kafka_consumer._handle_upload_request(payload)
 
-                    mock_validate.assert_called_once()
-                    mock_upload.assert_called_once()
-                    assert mock_kafka_send.called
-                    # Verify file.uploaded event was sent
-                    call_args = mock_kafka_send.call_args_list
-                    uploaded_call = next(
-                        (c for c in call_args if "file.uploaded" in str(c)), None
-                    )
-                    response_call = next(
-                        (c for c in call_args if "file.upload.response" in str(c)), None
-                    )
-                    assert uploaded_call is not None
-                    assert response_call is not None
-                    assert response_call[0][1]["status"] == "ok"
-                    assert response_call[0][1]["request_id"] == request_id
+                        mock_validate.assert_called_once()
+                        mock_upload.assert_called_once()
+                        assert mock_kafka_send.called
+                        # Verify file.uploaded event was sent
+                        call_args = mock_kafka_send.call_args_list
+                        uploaded_call = next(
+                            (c for c in call_args if "file.uploaded" in str(c)), None
+                        )
+                        response_call = next(
+                            (
+                                c
+                                for c in call_args
+                                if "file.upload.response" in str(c)
+                            ),
+                            None,
+                        )
+                        assert uploaded_call is not None
+                        assert response_call is not None
+                        assert response_call[0][1]["status"] == "ok"
+                        assert response_call[0][1]["request_id"] == request_id
 
 
 @pytest.mark.asyncio
