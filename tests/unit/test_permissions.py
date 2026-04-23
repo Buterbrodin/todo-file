@@ -99,6 +99,30 @@ async def test_check_file_permission_other_user_avatar_write():
 
 
 @pytest.mark.asyncio
+async def test_check_file_permission_internal_service_user_avatar():
+    """Internal services may manage user avatar files on behalf of auth."""
+    user = UserPrincipal(
+        user_id=99,
+        roles=["member"],
+        email=None,
+        is_internal_service=True,
+    )
+    file_meta = FileMetadata(
+        file_key="test.jpg",
+        file_type="avatar",
+        entity_type="user",
+        entity_id=2,
+        original_filename="test.jpg",
+        content_type="image/jpeg",
+        file_size=1024,
+        bucket_name="avatars",
+        url="http://test.com/test.jpg",
+    )
+
+    await check_file_permission(user, file_meta, "write")
+
+
+@pytest.mark.asyncio
 async def test_check_file_permission_project_file():
     """Test user can access project files."""
     user = UserPrincipal(user_id=1, roles=["member"], email="user@example.com")
@@ -196,6 +220,19 @@ async def test_validate_entity_exists_other_user():
 async def test_validate_entity_exists_admin():
     """Test admin can access any user entity."""
     user = UserPrincipal(user_id=1, roles=["admin"], email="admin@example.com")
+    await validate_entity_exists("user", 2, user)
+
+
+@pytest.mark.asyncio
+async def test_validate_entity_exists_internal_service_user():
+    """Internal services may upload user avatars for another user."""
+    user = UserPrincipal(
+        user_id=99,
+        roles=["member"],
+        email=None,
+        is_internal_service=True,
+    )
+
     await validate_entity_exists("user", 2, user)
 
 

@@ -14,7 +14,7 @@ from app.services.core_client import CoreServiceClient
 logger = logging.getLogger(__name__)
 
 
-async def check_file_permission(
+async def check_file_permission(  # pylint: disable=too-many-branches
     user: UserPrincipal,
     file_meta: FileMetadata,
     action: FileAction = FileAction.READ,
@@ -37,6 +37,8 @@ async def check_file_permission(
         return
 
     if file_meta.entity_type == EntityType.user:
+        if user.is_internal_service:
+            return
         if file_meta.entity_id == user.id:
             return
         if action != FileAction.READ:
@@ -93,7 +95,7 @@ async def check_file_permission(
     )
 
 
-async def check_list_files_access(
+async def check_list_files_access(  # pylint: disable=too-many-branches
     user: UserPrincipal,
     entity_type: Optional[str],
     entity_id: Optional[int],
@@ -122,6 +124,8 @@ async def check_list_files_access(
         )
 
     if entity_type == EntityType.user:
+        if user.is_internal_service:
+            return
         if entity_id != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -199,7 +203,7 @@ def validate_entity_type(entity_type: str) -> None:
         )
 
 
-async def validate_entity_exists(
+async def validate_entity_exists(  # pylint: disable=too-many-branches
     entity_type: str,
     entity_id: int,
     user: UserPrincipal,
@@ -229,6 +233,8 @@ async def validate_entity_exists(
         return
 
     if entity_type == EntityType.user:
+        if user.is_internal_service:
+            return
         if entity_id != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

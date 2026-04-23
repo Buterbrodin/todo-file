@@ -172,34 +172,104 @@ class KafkaRequestConsumer:
         elif topic == settings.KAFKA_TOPIC_FILE_LIST_REQUEST:
             await self._handle_list_request(payload)
 
-    async def _validate_token(
+    async def _resolve_request_user(
         self,
-        token: Optional[str],
+        payload: dict[str, Any],
         request_id: Optional[str],
         error_callback: Callable[[Optional[str], str], Any],
     ) -> Optional[UserPrincipal]:
         """
-        Validate request token.
+        Resolve request principal for Kafka-initiated actions.
 
         Args:
-            token: JWT token string.
+            payload: Raw Kafka payload.
             request_id: Request ID for error reporting.
             error_callback: Async function to call on error: (request_id, message).
 
         Returns:
-            UserPrincipal if token is valid, None otherwise.
+            UserPrincipal if credentials are valid, None otherwise.
         """
-        if not token:
-            logger.warning("Invalid request: missing token, request_id=%s", request_id)
-            await error_callback(request_id, "Missing authentication token")
+        token = payload.get("token")
+        user_id_raw = payload.get("user_id")
+        email = payload.get("email")
+        roles_raw = payload.get("roles") or payload.get("role") or []
+
+        if isinstance(roles_raw, str):
+            roles = [roles_raw]
+        else:
+            roles = list(roles_raw) if isinstance(roles_raw, list) else []
+
+        user_id: Optional[int] = None
+        if user_id_raw is not None:
+            try:
+                user_id = self._coerce_int_field(user_id_raw, "user_id")
+            except HTTPException as exc:
+                logger.warning(
+                    "Invalid request user_id: request_id=%s, detail=%s",
+                    request_id,
+                    exc.detail,
+                )
+                await error_callback(request_id, str(exc.detail))
+                return None
+            if user_id <= 0:
+                logger.warning(
+                    "Invalid request user_id <= 0: request_id=%s, user_id=%s",
+                    request_id,
+                    user_id,
+                )
+                await error_callback(request_id, "user_id must be greater than 0")
+                return None
+
+        if token:
+            internal_token = settings.INTERNAL_API_TOKEN
+            if internal_token and token == internal_token:
+                if user_id is None:
+                    logger.warning(
+                        "Invalid internal request: missing user_id, request_id=%s",
+                        request_id,
+                    )
+                    await error_callback(
+                        request_id,
+                        "user_id is required for internal service requests",
+                    )
+                    return None
+                return UserPrincipal(
+                    user_id=user_id,
+                    roles=roles,
+                    email=email,
+                    is_internal_service=True,
+                )
+
+            try:
+                user = decode_token(token)
+            except Exception as exc:
+                logger.warning("Invalid token in request: %s", exc)
+                await error_callback(request_id, "Invalid authentication token")
+                return None
+
+            if user_id is not None and user.id != user_id:
+                logger.warning(
+                    "JWT subject mismatch: request_id=%s, token_user_id=%s, "
+                    "payload_user_id=%s",
+                    request_id,
+                    user.id,
+                    user_id,
+                )
+                await error_callback(
+                    request_id, "Token subject does not match payload user_id"
+                )
+                return None
+            return user
+
+        if user_id is None:
+            logger.warning(
+                "Invalid request: missing token and user_id, request_id=%s",
+                request_id,
+            )
+            await error_callback(request_id, "Missing authentication credentials")
             return None
 
-        try:
-            return decode_token(token)
-        except Exception as exc:
-            logger.warning("Invalid token in request: %s", exc)
-            await error_callback(request_id, "Invalid authentication token")
-            return None
+        return UserPrincipal(user_id=user_id, roles=roles, email=email)
 
     def _coerce_int_field(self, value: Any, field_name: str) -> int:
         """Coerce Kafka payload field to int with strict validation."""
@@ -301,8 +371,8 @@ class KafkaRequestConsumer:
         request_id = payload.get("request_id")
         logger.info("Processing upload request: request_id=%s", request_id)
         try:
-            user = await self._validate_token(
-                payload.get("token"),
+            user = await self._resolve_request_user(
+                payload,
                 request_id,
                 self._send_upload_error,
             )
@@ -453,30 +523,18 @@ class KafkaRequestConsumer:
         """
         request_id = payload.get("request_id")
         try:
-            token = payload.get("token")
-            if not token:
-                logger.warning("Invalid delete request: missing token")
-                await self._send_delete_error(
-                    request_id, "Missing authentication token"
-                )
-                return
-
-            user = await self._validate_token(
-                token, request_id, self._send_delete_error
+            user = await self._resolve_request_user(
+                payload, request_id, self._send_delete_error
             )
             if not user:
                 return
 
             file_id_raw = payload.get("file_id")
-            if (
-                not isinstance(request_id, str)
-                or not request_id
-                or not isinstance(file_id_raw, int)
-            ):
+            if not isinstance(request_id, str) or not request_id or file_id_raw is None:
                 logger.warning("Invalid delete request: missing required fields")
                 await self._send_delete_error(request_id, "Missing required fields")
                 return
-            file_id = file_id_raw
+            file_id = self._coerce_int_field(file_id_raw, "file_id")
 
             async with get_db_session() as db:
                 res = await db.execute(
@@ -591,17 +649,22 @@ class KafkaRequestConsumer:
                 await self._send_list_error(request_id, "Missing request_id")
                 return
 
-            user = await self._validate_token(
-                payload.get("token"), request_id, self._send_list_error
+            user = await self._resolve_request_user(
+                payload, request_id, self._send_list_error
             )
             if not user:
                 return
 
             entity_type = payload.get("entity_type")
-            entity_id = payload.get("entity_id")
+            entity_id_raw = payload.get("entity_id")
             file_type = payload.get("file_type")
             page_raw = payload.get("page", 1)
             page_size_raw = payload.get("page_size", 20)
+            entity_id = (
+                self._coerce_int_field(entity_id_raw, "entity_id")
+                if entity_id_raw is not None
+                else None
+            )
 
             try:
                 page = int(page_raw)
@@ -632,9 +695,15 @@ class KafkaRequestConsumer:
             if file_type:
                 validate_file_type(file_type)
 
-            await check_list_files_access(
-                user, entity_type, entity_id, core_client=self._core_client
-            )
+            if self._core_client is not None:
+                await check_list_files_access(
+                    user,
+                    entity_type,
+                    entity_id,
+                    core_client=self._core_client,
+                )
+            else:
+                await check_list_files_access(user, entity_type, entity_id)
 
             async with get_db_session() as db:
                 query, total = await self._build_list_query(

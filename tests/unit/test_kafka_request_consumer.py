@@ -152,7 +152,7 @@ async def test_handle_upload_request_success(
 async def test_handle_upload_request_missing_token(
     kafka_consumer: KafkaRequestConsumer,
 ):
-    """Test upload request with missing token."""
+    """Test upload request with missing authentication credentials."""
     payload = {
         "request_id": "test-request-123",
         "file_data": base64.b64encode(b"test").decode("utf-8"),
@@ -170,7 +170,107 @@ async def test_handle_upload_request_missing_token(
         assert "file.upload.response" in str(call_args[0][0])
         response_payload = call_args[0][1]
         assert response_payload["status"] == "error"
-        assert "Missing authentication token" in response_payload["detail"]
+        assert "Missing authentication credentials" in response_payload["detail"]
+
+
+@pytest.mark.asyncio
+async def test_handle_upload_request_without_token_uses_user_id(
+    kafka_consumer: KafkaRequestConsumer,
+    valid_png_data: bytes,
+):
+    """Test upload request from todo-core without token but with user_id."""
+    request_id = "test-request-123"
+    payload = {
+        "request_id": request_id,
+        "file_data": base64.b64encode(valid_png_data).decode("utf-8"),
+        "file_name": "test.png",
+        "content_type": "image/png",
+        "file_type": "avatar",
+        "entity_type": "user",
+        "entity_id": 1,
+        "user_id": 1,
+    }
+
+    meta = MagicMock()
+    meta.id = 1
+    meta.url = "http://test-s3/avatars/test.png"
+    meta.created_at = datetime.now(timezone.utc)
+
+    with patch(
+        "app.services.kafka_request_consumer.validate_entity_exists",
+        new_callable=AsyncMock,
+    ) as mock_validate:
+        with patch.object(
+            kafka_consumer,
+            "_process_upload_file",
+            new_callable=AsyncMock,
+            return_value=meta,
+        ):
+            with patch(
+                "app.services.kafka_request_consumer.kafka_service._send",
+                new_callable=AsyncMock,
+            ) as mock_kafka_send:
+                await kafka_consumer._handle_upload_request(payload)
+
+                validate_args = mock_validate.call_args[0]
+                assert validate_args[2].id == 1
+                assert validate_args[2].is_internal_service is False
+                response_payload = mock_kafka_send.call_args_list[-1][0][1]
+                assert response_payload["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_handle_upload_request_internal_token_allows_service_context(
+    kafka_consumer: KafkaRequestConsumer,
+    valid_png_data: bytes,
+):
+    """Test upload request from todo-auth with internal token."""
+    request_id = "test-request-123"
+    payload = {
+        "request_id": request_id,
+        "token": "internal-token",
+        "file_data": base64.b64encode(valid_png_data).decode("utf-8"),
+        "file_name": "test.png",
+        "content_type": "image/png",
+        "file_type": "avatar",
+        "entity_type": "user",
+        "entity_id": 55,
+        "user_id": 7,
+    }
+
+    meta = MagicMock()
+    meta.id = 10
+    meta.url = "http://test-s3/avatars/test.png"
+    meta.created_at = datetime.now(timezone.utc)
+
+    with patch("app.services.kafka_request_consumer.settings") as mock_settings:
+        mock_settings.INTERNAL_API_TOKEN = "internal-token"
+        mock_settings.ALLOWED_IMAGE_TYPES = settings.ALLOWED_IMAGE_TYPES
+        mock_settings.MAX_FILE_SIZE = settings.MAX_FILE_SIZE
+        mock_settings.KAFKA_TOPIC_FILE_UPLOAD_RESPONSE = (
+            settings.KAFKA_TOPIC_FILE_UPLOAD_RESPONSE
+        )
+        with patch(
+            "app.services.kafka_request_consumer.validate_entity_exists",
+            new_callable=AsyncMock,
+        ) as mock_validate:
+            with patch.object(
+                kafka_consumer,
+                "_process_upload_file",
+                new_callable=AsyncMock,
+                return_value=meta,
+            ):
+                with patch(
+                    "app.services.kafka_request_consumer.kafka_service._send",
+                    new_callable=AsyncMock,
+                ) as mock_kafka_send:
+                    await kafka_consumer._handle_upload_request(payload)
+
+                    validate_args = mock_validate.call_args[0]
+                    assert validate_args[2].id == 7
+                    assert validate_args[2].is_internal_service is True
+                    response_payload = mock_kafka_send.call_args_list[-1][0][1]
+                    assert response_payload["status"] == "ok"
 
 
 @pytest.mark.asyncio
@@ -549,7 +649,7 @@ async def test_handle_list_request_success(
 async def test_handle_list_request_missing_token(
     kafka_consumer: KafkaRequestConsumer,
 ):
-    """Test list request with missing token."""
+    """Test list request with missing authentication credentials."""
     payload = {"request_id": "test-request-123"}
 
     with patch(
@@ -563,7 +663,7 @@ async def test_handle_list_request_missing_token(
         call_args = mock_kafka_send.call_args
         response_payload = call_args[0][1]
         assert response_payload["status"] == "error"
-        assert "Missing authentication token" in response_payload["detail"]
+        assert "Missing authentication credentials" in response_payload["detail"]
 
 
 @pytest.mark.asyncio

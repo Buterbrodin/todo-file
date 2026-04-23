@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal, Optional
 
-from pydantic import Field, HttpUrl, PostgresDsn
+from pydantic import Field, HttpUrl, PostgresDsn, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -56,8 +56,12 @@ class Settings(BaseSettings):
     KAFKA_TOPIC_FILE_LIST_REQUEST: str = "file.list.request"
     KAFKA_TOPIC_FILE_LIST_RESPONSE: str = "file.list.response"
 
-    JWT_SECRET: str = Field(min_length=32)
+    JWT_SECRET: str = Field(
+        default="change_me_change_me_change_me_12345",
+        min_length=32,
+    )
     JWT_ALG: str = "HS256"
+    INTERNAL_API_TOKEN: Optional[str] = None
 
     AUTH_SERVICE_BASE_URL: Optional[HttpUrl] = None
     AUTH_USER_EXISTS_PATH: str = "/internal/users/exists"
@@ -68,6 +72,17 @@ class Settings(BaseSettings):
     FILE_BASE_URL: str = "http://localhost:8002"
 
     ENV: Literal["local", "dev", "prod", "test"] = "local"
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def _parse_debug(cls, value):
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "prod", "production"}:
+                return False
+            if normalized in {"debug", "dev", "local"}:
+                return True
+        return value
 
 
 @lru_cache

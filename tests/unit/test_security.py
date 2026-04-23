@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+ tests/unit/test_security.pyfrom datetime import datetime, timedelta
 from unittest.mock import patch
 
 import jwt
@@ -17,6 +17,7 @@ class TestUserPrincipal:
         assert user.role == "member"
         assert user.email == "test@example.com"
         assert user.is_authenticated is True
+        assert user.is_internal_service is False
         assert user.is_admin is False
 
     def test_user_principal_admin(self):
@@ -47,6 +48,17 @@ class TestUserPrincipal:
         user = UserPrincipal(user_id=1, roles=["member"], email=None)
 
         assert user.email is None
+
+    def test_user_principal_internal_service(self):
+        user = UserPrincipal(
+            user_id=7,
+            roles=["member"],
+            email=None,
+            is_internal_service=True,
+        )
+
+        assert user.id == 7
+        assert user.is_internal_service is True
 
 
 class TestDecodeToken:

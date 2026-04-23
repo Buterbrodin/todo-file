@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     try:
         logger.info("Initializing database...")
-        await db.ensure_engine_async()
+        db.ensure_engine()
         logger.info("Starting Kafka services...")
         await kafka_service.start()
         await kafka_request_consumer.start()

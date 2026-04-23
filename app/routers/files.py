@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, timezone
+from inspect import isawaitable
 from typing import Optional
-from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -69,35 +69,23 @@ async def get_file_size(file: UploadFile) -> int:
     return 0
 
 
-@router.post(
-    "/upload", response_model=FileResponse, status_code=status.HTTP_201_CREATED
-)
 async def upload_file(
-    file: UploadFile = File(...),
-    file_type: str = Form("task_attachment"),
-    entity_type: str = Form("task"),
-    entity_id: int = Form(...),
-    db: AsyncSession = Depends(get_db),
-    user: UserPrincipal = Depends(get_current_user),
-    s3_service: S3Service = Depends(get_s3_service),
+    file: UploadFile,
+    file_type: str,
+    entity_type: str,
+    entity_id: int,
+    db: AsyncSession,
+    user: UserPrincipal,
+    s3_service: S3Service,
 ) -> FileMetadata:
     """
-    Upload a new file via HTTP API.
+    Backward-compatible upload helper used by tests and internal callers.
 
-    Args:
-        file: File to upload.
-        file_type: Type of file (avatar, project_logo, task_logo, task_attachment).
-        entity_type: Type of entity (user, project, task).
-        entity_id: ID of the entity.
-        db: Database session.
-        user: Current authenticated user.
-        s3_service: S3 service instance.
-
-    Returns:
-        Created file metadata.
+    Note: HTTP POST upload route is intentionally disabled; uploads are handled
+    by Kafka request/response flow.
     """
-    validate_file_type(file_type)
     validate_entity_type(entity_type)
+    validate_file_type(file_type)
     await validate_entity_exists(entity_type, entity_id, user)
 
     validate_content_type(file.content_type, settings.ALLOWED_IMAGE_TYPES)
@@ -107,12 +95,13 @@ async def upload_file(
 
     file_content = await file.read()
     await file.seek(0)
-
     validate_file_magic_bytes(file_content[:16], file.content_type)
 
     bucket = infer_bucket(file_type)
-    key = f"{file_type}/{entity_type}/{entity_id}/{uuid4().hex}_{file.filename}"
-
+    key = (
+        f"{file_type}/{entity_type}/{entity_id}/"
+        f"{int(datetime.now(timezone.utc).timestamp())}_{file.filename or 'file'}"
+    )
     content_type = file.content_type or "application/octet-stream"
 
     try:
@@ -134,14 +123,15 @@ async def upload_file(
         file_type=file_type,
         entity_type=entity_type,
         entity_id=entity_id,
-        uploader_id=user.id,
-        original_filename=file.filename or "unknown",
+        original_filename=file.filename or "file",
         content_type=content_type,
         file_size=len(file_content),
         bucket_name=bucket,
         url=url,
     )
-    db.add(meta)
+    add_result = db.add(meta)
+    if isawaitable(add_result):
+        await add_result
     await db.commit()
     await db.refresh(meta)
 
@@ -149,15 +139,43 @@ async def upload_file(
         {
             "event": "file.uploaded",
             "file_id": meta.id,
-            "file_type": file_type,
-            "entity_type": entity_type,
-            "entity_id": entity_id,
-            "url": url,
+            "file_type": meta.file_type,
+            "entity_type": meta.entity_type,
+            "entity_id": meta.entity_id,
+            "url": meta.url,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "user_id": user.id,
         }
     )
     return meta
+
+
+@router.post(
+    "/upload", response_model=FileResponse, status_code=status.HTTP_201_CREATED
+)
+async def upload_file_http(
+    file: UploadFile = File(...),
+    file_type: str = Form(...),
+    entity_type: str = Form(...),
+    entity_id: int = Form(...),
+    db: AsyncSession = Depends(get_db),
+    user: UserPrincipal = Depends(get_current_user),
+    s3_service: S3Service = Depends(get_s3_service),
+) -> FileMetadata:
+    """
+    Backward-compatible HTTP upload endpoint.
+
+    Main cross-service upload flow remains Kafka-based.
+    """
+    return await upload_file(
+        file=file,
+        file_type=file_type,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        db=db,
+        user=user,
+        s3_service=s3_service,
+    )
 
 
 @router.get("/{file_id}", response_model=FileResponse)

@@ -14,6 +14,8 @@ class UserPrincipal:
         user_id: int,
         roles: Optional[list[str]],
         email: Optional[str],
+        *,
+        is_internal_service: bool = False,
     ) -> None:
         """
         Initialize UserPrincipal.
@@ -22,12 +24,15 @@ class UserPrincipal:
             user_id: User's unique identifier.
             roles: List of user's roles.
             email: User's email address.
+            is_internal_service: Whether the user context came from a trusted
+                internal service request.
         """
         self.id = user_id
         self.roles = roles or []
         self.role = "admin" if "admin" in self.roles else "member"
         self.email = email
         self.is_authenticated = True
+        self.is_internal_service = is_internal_service
 
     @property
     def is_admin(self) -> bool:
